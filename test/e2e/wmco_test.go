@@ -27,7 +27,7 @@ func TestWMCO(t *testing.T) {
 	//		Jira Story: https://issues.redhat.com/browse/WINC-283
 	t.Run("WMC CR validation", testWMCValidation)
 	t.Run("create", creationTestSuite)
-	t.Run("destroy", deletionTestSuite)
+	//t.Run("destroy", deletionTestSuite)
 }
 
 // setupWMCO setups the resources needed to run WMCO tests

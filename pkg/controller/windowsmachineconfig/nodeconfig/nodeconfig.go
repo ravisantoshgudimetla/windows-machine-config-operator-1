@@ -2,6 +2,7 @@ package nodeconfig
 
 import (
 	"fmt"
+	"k8s.io/api/core/v1"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ const (
 	RetryInterval = 5 * time.Second
 	// bootstrapCSR is the CSR name associated with a worker node that just got bootstrapped.
 	bootstrapCSR = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
+	// workerLabel is the label that needs to be applied to the Windows node to make it worker node
+	WorkerLabel = "node-role.kubernetes.io/worker"
 )
 
 // nodeConfig holds the information to make the given VM a kubernetes node. As of now, it holds the information
@@ -47,6 +50,53 @@ func (nc *nodeConfig) Configure() error {
 	}
 	if err := nc.handleCSRs(); err != nil {
 		return errors.Wrap(err, "handling CSR for the given node failed")
+	}
+
+	var instanceID string
+	// As the CSR has been approved get the Kubernetes node object associated
+	// the Windows VM created
+	if nc.Windows.GetCredentials() != nil && len(nc.Windows.GetCredentials().GetInstanceId()) > 0 {
+		instanceID = nc.Windows.GetCredentials().GetInstanceId()
+	}
+
+	// Get the node object associated with node
+	node, err := nc.getNodeObjectAssociated(instanceID)
+	if err != nil {
+		return errors.Wrap(err, "node object associated with the node")
+	}
+
+	// Apply worker labels
+	if err := nc.applyWorkerLabel(node); err != nil {
+		return errors.Wrap(err, "failed applying worker label")
+	}
+	return nil
+}
+
+func (nc *nodeConfig) getNodeObjectAssociated(instanceID string) (*v1.Node, error) {
+	nodes, err := nc.k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: "node.openshift.io/os_id=Windows"})
+	if err != nil {
+		return nil, errors.Wrap(err, "error listing nodes")
+	}
+	for _, node := range nodes.Items {
+		if instanceID == GetInstanceID(node.Spec.ProviderID) {
+			return &node, nil
+		}
+	}
+	return nil, errors.Errorf("unable to find node for instanceID %s", instanceID)
+}
+
+// GetInstanceID gets the instanceID of VM for a given cloud provider ID
+// Ex: aws:///us-east-1e/i-078285fdadccb2eaa. We always want the last entry which is the instanceID
+func GetInstanceID(providerID string) string {
+	providerTokens := strings.Split(providerID, "/")
+	return providerTokens[len(providerTokens)-1]
+}
+
+// applyWorkerLabel applies the worker label to the Windows Node we created.
+func (nc *nodeConfig) applyWorkerLabel(node *v1.Node) error {
+	node.Labels[WorkerLabel] = ""
+	if _, err := nc.k8sclientset.CoreV1().Nodes().Update(node); err != nil {
+		return errors.Wrap(err, "error updating node object")
 	}
 	return nil
 }

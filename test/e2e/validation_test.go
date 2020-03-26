@@ -11,6 +11,7 @@ import (
 
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	wmc "github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig"
+	nc "github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/tracker"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	"github.com/pkg/errors"
@@ -48,13 +49,6 @@ func waitForTrackerConfigMap(kubeclient kubernetes.Interface, namespace string, 
 	return err
 }
 
-// getInstanceID gets the instanceID of VM for a given cloud provider ID
-// Ex: aws:///us-east-1e/i-078285fdadccb2eaa. We always want the last entry which is the instanceID
-func getInstanceID(providerID string) string {
-	providerTokens := strings.Split(providerID, "/")
-	return providerTokens[len(providerTokens)-1]
-}
-
 // getInstanceIDsOfNode returns the instanceIDs of all the Windows nodes created
 func getInstanceIDsOfNode(kubeclient kubernetes.Interface) ([]string, error) {
 	nodes, err := kubeclient.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: wmc.WindowsOSLabel})
@@ -64,7 +58,7 @@ func getInstanceIDsOfNode(kubeclient kubernetes.Interface) ([]string, error) {
 	instanceIDs := make([]string, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
 		if len(node.Spec.ProviderID) > 0 {
-			instanceID := getInstanceID(node.Spec.ProviderID)
+			instanceID := nc.GetInstanceID(node.Spec.ProviderID)
 			instanceIDs = append(instanceIDs, instanceID)
 		}
 	}
@@ -273,4 +267,16 @@ func createWindowsMachineConfig(namespace string, isReplicasFieldRequired bool, 
 		wmc.Spec.Replicas = replicasFieldValue
 	}
 	return wmc
+}
+
+// testWorkerLabel tests if the worker label has been applied properly
+func testWorkerLabel(t *testing.T, nodeCount int) {
+	testCtx := framework.NewTestCtx(t)
+	defer testCtx.Cleanup()
+	nodes, err := framework.Global.KubeClient.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: wmc.WindowsOSLabel})
+	require.NoError(t, err, "error querying the nodes")
+	require.Equal(t, len(nodes.Items), nodeCount, "mismatched node count")
+	for _, node := range nodes.Items {
+		assert.Contains(t, node.Labels, nc.WorkerLabel, "expected node label to be present")
+	}
 }
