@@ -18,6 +18,8 @@ const (
 	remoteDir = "C:\\Temp\\"
 	// winTemp is the default Windows temporary directory
 	winTemp = "C:\\Windows\\Temp\\"
+	// cniDir is the directory for storing cni files
+	cniDir = "C:\\Windows\\Temp\\cni\\"
 	// wgetIgnoreCertCmd is the remote location of the wget-ignore-cert.ps1 script
 	wgetIgnoreCertCmd = remoteDir + "wget-ignore-cert.ps1"
 	// logDir is the remote kubernetes log directory
@@ -212,6 +214,54 @@ func (vm *Windows) waitForHybridOverlayToRun() error {
 
 	// hybrid-overlay never started running
 	return fmt.Errorf("timeout waiting for hybrid-overlay: %v", err)
+}
+
+// ConfigureCNI ensures that the cni configuration in done on the node
+func (vm *Windows) ConfigureCNI() error {
+	var errorMessages []string
+
+	// create cni directory
+	_, _, err := vm.Run(mkdirCmd(cniDir), false)
+	if err != nil {
+		return errors.Wrapf(err, "unable to create CNI directory %v", cniDir)
+	}
+	// copy the cni plugins to windows VM
+	var cniPlugins = []string{
+		wkl.FlannelCNIPluginPath,
+		wkl.WinBridgeCNIPlugin,
+		wkl.HostLocalCNIPlugin,
+		wkl.WinOverlayCNIPlugin,
+	}
+
+	for _, plugin := range cniPlugins {
+		if err := vm.CopyFile(plugin, cniDir); err != nil {
+			errorMessages = append(errorMessages,
+				fmt.Sprintf("unable to copy %s to %s", plugin, cniDir))
+		}
+	}
+
+	if len(errorMessages) > 0 {
+		return fmt.Errorf("errors encountered while copying CNI plugins: %s",
+			strings.Join(errorMessages, ", "))
+	}
+
+	// copy the cni config to windows VM
+	err = vm.CopyFile(wkl.CNIConfigPath, cniDir)
+	if err != nil {
+		return errors.Wrapf(err, "unable to copy CNI config to %s", cniDir)
+	}
+
+	// run the configure-cni command on windows VM
+	configureCNICmd := remoteDir + "wmcb.exe configure-cni --cni-dir=\"" +
+		cniDir + " --cni-config=\"" + cniDir + "cni.conf\""
+	_, stderr, err := vm.Run(configureCNICmd, true)
+
+	if err != nil || stderr != "" {
+		log.Info("CNI configuration failed", "CNI configuration command", configureCNICmd, "stderr", stderr, "err", err)
+		return errors.Wrap(err, "CNI configuration failed")
+	}
+
+	return nil
 }
 
 // mkdirCmd returns the Windows command to create a directory if it does not exists

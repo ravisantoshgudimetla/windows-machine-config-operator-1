@@ -38,4 +38,6 @@ const (
 	// HybridOverlayPath contains the path of the hybrid overlay binary. The container image should already have this
 	// binary mounted
 	HybridOverlayPath = payloadDirectory + HybridOverlayName
+	// CNI config file path
+	CNIConfigPath = payloadDirectory + "cni-config/cni.conf"
 )

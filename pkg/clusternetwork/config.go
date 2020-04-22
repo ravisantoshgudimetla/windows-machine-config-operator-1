@@ -3,6 +3,7 @@ package clusternetwork
 import (
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1 "github.com/openshift/client-go/operator/clientset/versioned/typed/operator/v1"
+	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -35,6 +36,13 @@ func NetworkConfigurationFactory(oclient configclient.Interface, operatorClient 
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting cluster network type")
 	}
+
+	// pass configclient to retrieve serviceCIDR using cluster config for cni configurations
+	err = nodeconfig.GetServiceNetworkCIDR(oclient)
+	if err != nil {
+		return nil, errors.Wrap(err, "error passing configclient for cluster to retrieve service network CIDR")
+	}
+
 	switch network {
 	case ovnKubernetesNetwork:
 		return &ovnKubernetes{

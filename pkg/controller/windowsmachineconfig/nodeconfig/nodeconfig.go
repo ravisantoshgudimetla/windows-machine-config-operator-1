@@ -78,6 +78,10 @@ func (nc *nodeConfig) Configure() error {
 	if err := nc.configureNetwork(); err != nil {
 		return errors.Wrap(err, "configuring node network failed")
 	}
+	// Configure CNI in the node
+	if err := nc.configureCNI(); err != nil {
+		return errors.Wrap(err, "error configuring CNI")
+	}
 	return nil
 }
 
@@ -272,6 +276,20 @@ func (nc *nodeConfig) waitForNodeAnnotation(annotation string) error {
 
 	if !found {
 		return errors.Wrap(err, fmt.Sprintf("timeout waiting for %s node annotation", annotation))
+	}
+	return nil
+}
+
+// configureCNI populates the cni config template and
+func (nc *nodeConfig) configureCNI() error {
+	// update the CNI config file with the host subnet and the service network CIDR
+	log.Info(nc.node.Annotations[HybridOverlaySubnet])
+	log.Info(cni.ServiceNetworkCIDR)
+	cni.hostSubnet = nc.node.Annotations[HybridOverlaySubnet]
+	err := populateCniConfig()
+	// configure CNI in the Windows VM
+	if err = nc.Windows.ConfigureCNI(); err != nil {
+		return errors.Wrapf(err, "error configuring CNI for %s", nc.node.GetName())
 	}
 	return nil
 }
