@@ -78,10 +78,6 @@ func (nc *nodeConfig) Configure() error {
 	if err := nc.configureNetwork(); err != nil {
 		return errors.Wrap(err, "configuring node network failed")
 	}
-	// Configure CNI in the node
-	if err := nc.configureCNI(); err != nil {
-		return errors.Wrap(err, "error configuring CNI")
-	}
 	return nil
 }
 
@@ -108,6 +104,11 @@ func (nc *nodeConfig) configureNetwork() error {
 	if err := nc.waitForNodeAnnotation(HybridOverlayMac); err != nil {
 		return errors.Wrap(err, fmt.Sprintf("error waiting for %s node annotation for %s", HybridOverlayMac,
 			nc.node.GetName()))
+	}
+
+	// Configure CNI in the Windows VM
+	if err := nc.configureCNI(); err != nil {
+		return errors.Wrapf(err, "error configuring CNI for %s", nc.node.GetName())
 	}
 	return nil
 }
