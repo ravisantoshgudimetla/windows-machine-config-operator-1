@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	cni = new(CniConfigVars)
+	cni = new(cniConfigVars)
 )
 
-// CniConfigVars holds the information required for populating cni config
-type CniConfigVars struct {
+// cniConfigVars holds the information required for populating cni config
+type cniConfigVars struct {
 	ServiceNetworkCIDR string
 	hostSubnet         string
 }
