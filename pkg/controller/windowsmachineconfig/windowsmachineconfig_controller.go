@@ -273,9 +273,9 @@ func (r *ReconcileWindowsMachineConfig) addWorkerNode() (types.WindowsVM, error)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating windows VM")
 	}
-
+	cniOpts := newCniOptions(r.ClusterInfo.GetServiceCIDR())
 	log.V(1).Info("configuring the Windows VM", "ID", vm.GetCredentials().GetInstanceId())
-	nc := nodeconfig.NewNodeConfig(r.k8sclientset, vm)
+	nc := nodeconfig.NewNodeConfig(r.k8sclientset, vm, cniOpts)
 	if err := nc.Configure(); err != nil {
 		// TODO: Unwrap to extract correct error
 		if cleanupErr := r.removeWorkerNode(vm); cleanupErr != nil {

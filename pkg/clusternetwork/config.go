@@ -3,7 +3,6 @@ package clusternetwork
 import (
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1 "github.com/openshift/client-go/operator/clientset/versioned/typed/operator/v1"
-	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -19,16 +18,11 @@ type ClusterNetworkConfig interface {
 type networkType struct {
 	// name describes value of the Network Type
 	name string
-	// oclient is the OpenShift config client, we will use to interact with the OpenShift API
-	oclient configclient.Interface
 	// operatorClient is the OpenShift operator client, we will use to interact with OpenShift operator objects
 	operatorClient operatorv1.OperatorV1Interface
 }
 
-// ovnKubernetes contains information specific to network type OVNKubernetes
-type ovnKubernetes struct {
-	networkType
-}
+
 
 // NetworkConfigurationFactory is a factory method that returns information specific to network type
 func NetworkConfigurationFactory(oclient configclient.Interface, operatorClient operatorv1.OperatorV1Interface) (ClusterNetworkConfig, error) {
@@ -38,7 +32,7 @@ func NetworkConfigurationFactory(oclient configclient.Interface, operatorClient 
 	}
 
 	// pass configclient to retrieve serviceCIDR using cluster config for cni configurations
-	err = nodeconfig.GetServiceNetworkCIDR(oclient)
+	serviceCIDR, err := GetServiceNetworkCIDR(oclient)
 	if err != nil {
 		return nil, errors.Wrap(err, "error passing configclient for cluster to retrieve service network CIDR")
 	}
@@ -48,9 +42,9 @@ func NetworkConfigurationFactory(oclient configclient.Interface, operatorClient 
 		return &ovnKubernetes{
 			networkType{
 				name:           network,
-				oclient:        oclient,
 				operatorClient: operatorClient,
 			},
+			 newCniConfigVars(serviceCIDR),
 		}, nil
 	default:
 		return nil, errors.Errorf("%s : network type not supported", network)

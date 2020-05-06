@@ -2,6 +2,7 @@ package nodeconfig
 
 import (
 	"fmt"
+	"github.com/openshift/windows-machine-config-operator/pkg/clusternetwork"
 	"strings"
 	"time"
 
@@ -40,6 +41,8 @@ type nodeConfig struct {
 	*windows.Windows
 	// Node holds the information related to node object
 	node *v1.Node
+	// networkSpecific
+	cniOptions clusternetwork.
 }
 
 // NewNodeConfig creates a new instance of nodeConfig to be used by the caller.
@@ -105,7 +108,6 @@ func (nc *nodeConfig) configureNetwork() error {
 		return errors.Wrap(err, fmt.Sprintf("error waiting for %s node annotation for %s", HybridOverlayMac,
 			nc.node.GetName()))
 	}
-
 	// Configure CNI in the Windows VM
 	if err := nc.configureCNI(); err != nil {
 		return errors.Wrapf(err, "error configuring CNI for %s", nc.node.GetName())
@@ -285,9 +287,10 @@ func (nc *nodeConfig) waitForNodeAnnotation(annotation string) error {
 func (nc *nodeConfig) configureCNI() error {
 	// update the CNI config file with the host subnet and the service network CIDR
 	log.Info(nc.node.Annotations[HybridOverlaySubnet])
-	log.Info(cni.ServiceNetworkCIDR)
-	cni.hostSubnet = nc.node.Annotations[HybridOverlaySubnet]
-	err := populateCniConfig()
+	log.Info(clusternetwork.cni.ServiceNetworkCIDR)
+	nc.cniOptions.SetHostSubnet(nc.node.Annotations[HybridOverlaySubnet])
+	clusternetwork.cni.hostSubnet = nc.node.Annotations[HybridOverlaySubnet]
+	err := clusternetwork.PopulateCniConfig()
 	// configure CNI in the Windows VM
 	if err = nc.Windows.ConfigureCNI(); err != nil {
 		return errors.Wrapf(err, "error configuring CNI for %s", nc.node.GetName())
