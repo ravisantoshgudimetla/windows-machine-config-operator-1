@@ -9,4 +9,4 @@ spec:
   name: windows-machine-config-operator
   source: wmco
   sourceNamespace: openshift-marketplace
-  startingCSV: windows-machine-config-operator.v0.0.0
+  startingCSV: windows-machine-config-operator.v0.0.1

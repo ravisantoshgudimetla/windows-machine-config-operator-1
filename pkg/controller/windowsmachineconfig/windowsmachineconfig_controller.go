@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"os"
 
+	mapiv1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	wmcapi "github.com/openshift/windows-machine-config-operator/pkg/apis/wmc/v1alpha1"
 	wkl "github.com/openshift/windows-machine-config-operator/pkg/controller/wellknownlocations"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+
+	//corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	k8sapierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -75,15 +78,66 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	if err != nil {
 		return errors.Wrapf(err, "could not create %s", ControllerName)
 	}
+	windowsOSLabel := "node.openshift.io/os_id"
+	preds := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			labels := e.Meta.GetLabels()
+			if _, ok := labels[windowsOSLabel]; ok {
+				return true
+			}
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.MetaOld == nil {
+				log.Error(nil, "Update event has no old metadata", "event", e)
+				return false
+			}
+			if e.ObjectOld == nil {
+				log.Error(nil, "Update event has no old runtime object to update", "event", e)
+				return false
+			}
+			if e.ObjectNew == nil {
+				log.Error(nil, "Update event has no new runtime object for update", "event", e)
+				return false
+			}
+			if e.MetaNew == nil {
+				log.Error(nil, "Update event has no new metadata", "event", e)
+				return false
+			}
+			newLabels := e.MetaNew.GetLabels()
+			if _, ok := newLabels[windowsOSLabel]; ok {
+				return e.MetaNew.GetGeneration() != e.MetaOld.GetGeneration()
+			}
+			return false
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			labels := e.Meta.GetLabels()
+			if _, ok := labels[windowsOSLabel]; ok {
+				return true
+			}
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			labels := e.Meta.GetLabels()
+			if _, ok := labels[windowsOSLabel]; ok {
+				return true
+			}
+			return false
+		},
+	}
 	// TODO: Add a predicate here. As of now, we get event notifications for all the WindowsMachineConfig objects, we
 	//		want the predicate to filter the WMC object called `instance`
 	//		Jira Story: https://issues.redhat.com/browse/WINC-282
 	// Watch for changes to primary resource WindowsMachineConfig
-	err = c.Watch(&source.Kind{Type: &wmcapi.WindowsMachineConfig{}}, &handler.EnqueueRequestForObject{},
-		// prevent reconciling due to a status update
-		predicate.GenerationChangedPredicate{})
+	// err = c.Watch(&source.Kind{Type: &wmcapi.WindowsMachineConfig{}}, &handler.EnqueueRequestForObject{},
+	// 	// prevent reconciling due to a status update
+	//predicate.GenerationChangedPredicate{})
+	// if err != nil {
+	// 	return errors.Wrap(err, "could not create watch on WindowsMachineConfig objects")
+	// }
+	err = c.Watch(&source.Kind{Type: &mapiv1.Machine{}}, &handler.EnqueueRequestForObject{}, preds)
 	if err != nil {
-		return errors.Wrap(err, "could not create watch on WindowsMachineConfig objects")
+		return errors.Wrap(err, "could not create watch on the machine objects")
 	}
 	return nil
 }
@@ -154,7 +208,9 @@ func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (re
 	log.Info("reconciling", "namespace", request.Namespace, "name", request.Name)
 
 	// Fetch the WindowsMachineConfig instance
-	instance := &wmcapi.WindowsMachineConfig{}
+	instance := &mapiv1.Machine{}
+	fmt.Println("ravig", request.NamespacedName)
+	//instance.ObjectMeta.Labels
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
 		if k8sapierrors.IsNotFound(err) {
@@ -166,59 +222,72 @@ func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (re
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-
-	r.statusMgr = NewStatusManager(r.client, request.NamespacedName)
-	if err := r.getCloudProvider(instance); err != nil {
-		// Failed to get cloud provider so make sure we reflect that in the CR status
-		r.statusMgr.setStatusConditions([]wmcapi.WindowsMachineConfigCondition{
-			*wmcapi.NewWindowsMachineConfigCondition(wmcapi.Degraded, corev1.ConditionTrue,
-				wmcapi.CloudProviderAPIFailureReason, fmt.Sprintf("could not get cloud provider: %s", err))})
-		if err = r.statusMgr.updateStatus(); err != nil {
-			log.Error(err, "error updating status")
-		}
-		// Not going to requeue as an issue here indicates a problem with the provided credentials
-		log.Error(err, "could not get cloud provider")
+	if len(instance.Status.Addresses) == 0 {
 		return reconcile.Result{}, nil
 	}
+	var externalIP string
+	for _, address := range instance.Status.Addresses {
+		if address.Type == v1.NodeExternalIP {
+			externalIP = address.Address
+		}
+	}
+	//var neededBytes []byte
+	instanceID := string(instance.Status.ProviderStatus.Raw)
+	// userName := "Administrator"
+	// password := "tP(CuFEL=?c(N%NQioo&naJySI!JF)W!"
+	fmt.Println(externalIP, instanceID)
+	// r.statusMgr = NewStatusManager(r.client, request.NamespacedName)
+	// if err := r.getCloudProvider(instance); err != nil {
+	// 	// Failed to get cloud provider so make sure we reflect that in the CR status
+	// 	r.statusMgr.setStatusConditions([]wmcapi.WindowsMachineConfigCondition{
+	// 		*wmcapi.NewWindowsMachineConfigCondition(wmcapi.Degraded, corev1.ConditionTrue,
+	// 			wmcapi.CloudProviderAPIFailureReason, fmt.Sprintf("could not get cloud provider: %s", err))})
+	// 	if err = r.statusMgr.updateStatus(); err != nil {
+	// 		log.Error(err, "error updating status")
+	// 	}
+	// 	// Not going to requeue as an issue here indicates a problem with the provided credentials
+	// 	log.Error(err, "could not get cloud provider")
+	// 	return reconcile.Result{}, nil
+	// }
 
 	// Get the current number of Windows VMs created by WMCO.
 	// TODO: Get all the running Windows nodes in the cluster
 	//		jira story: https://issues.redhat.com/browse/WINC-280
-	windowsNodes, err := r.k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: nodeconfig.WindowsOSLabel})
-	if err != nil {
-		// This is most likely a permission error
-		return reconcile.Result{}, errors.Wrap(err, "unable to get count of Windows nodes")
-	}
+	// windowsNodes, err := r.k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: nodeconfig.WindowsOSLabel})
+	// if err != nil {
+	// 	// This is most likely a permission error
+	// 	return reconcile.Result{}, errors.Wrap(err, "unable to get count of Windows nodes")
+	// }
 
 	// Get the current count of required number of Windows VMs
-	currentCountOfWindowsVMs := len(windowsNodes.Items)
+	//currentCountOfWindowsVMs := len(windowsNodes.Items)
 
-	// Update status to reflect that operator is reconciling
-	r.statusMgr.setStatusConditions([]wmcapi.WindowsMachineConfigCondition{
-		*wmcapi.NewWindowsMachineConfigCondition(wmcapi.Reconciling, corev1.ConditionTrue, "", "")})
-	if err = r.statusMgr.updateStatus(); err != nil {
-		// Don't continue reconciling and requeue on status error
-		return reconcile.Result{}, err
-	}
+	// // Update status to reflect that operator is reconciling
+	// r.statusMgr.setStatusConditions([]wmcapi.WindowsMachineConfigCondition{
+	// 	*wmcapi.NewWindowsMachineConfigCondition(wmcapi.Reconciling, corev1.ConditionTrue, "", "")})
+	// if err = r.statusMgr.updateStatus(); err != nil {
+	// 	// Don't continue reconciling and requeue on status error
+	// 	return reconcile.Result{}, err
+	// }
 
 	// Add or remove nodes
-	nodeCount, nodeReconcileErrs := r.reconcileWindowsNodes(int(instance.Spec.Replicas), currentCountOfWindowsVMs)
+	//nodeCount, nodeReconcileErrs := r.reconcileWindowsNodes(int(instance.Spec.Replicas), currentCountOfWindowsVMs)
 
 	// Update all conditions and node count
-	r.statusMgr.joinedVMCount = nodeCount
-	r.statusMgr.setDegradedCondition(nodeReconcileErrs)
-	r.statusMgr.setStatusConditions([]wmcapi.WindowsMachineConfigCondition{
-		*wmcapi.NewWindowsMachineConfigCondition(wmcapi.Reconciling, corev1.ConditionFalse, "", "")})
-	if err = r.statusMgr.updateStatus(); err != nil {
-		// Its important that we update status after reconciliation. Log out any reconcile errors and requeue
-		log.Error(fmt.Errorf("%v", nodeReconcileErrs), "error reconciling")
-		return reconcile.Result{}, errors.Wrap(err, "error updating status")
-	}
+	// r.statusMgr.joinedVMCount = nodeCount
+	// r.statusMgr.setDegradedCondition(nodeReconcileErrs)
+	// r.statusMgr.setStatusConditions([]wmcapi.WindowsMachineConfigCondition{
+	// 	*wmcapi.NewWindowsMachineConfigCondition(wmcapi.Reconciling, corev1.ConditionFalse, "", "")})
+	// if err = r.statusMgr.updateStatus(); err != nil {
+	// 	// Its important that we update status after reconciliation. Log out any reconcile errors and requeue
+	// 	log.Error(fmt.Errorf("%v", nodeReconcileErrs), "error reconciling")
+	// 	return reconcile.Result{}, errors.Wrap(err, "error updating status")
+	// }
 
 	// Now that we've updated the status we can return a possible reconcile error
-	if nodeReconcileErrs != nil {
-		return reconcile.Result{}, fmt.Errorf("reconcile error: %v", nodeReconcileErrs)
-	}
+	// if nodeReconcileErrs != nil {
+	// 	return reconcile.Result{}, fmt.Errorf("reconcile error: %v", nodeReconcileErrs)
+	// }
 	return reconcile.Result{}, nil
 }
 

@@ -10,6 +10,7 @@ replace (
 	github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.10.0
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20200205145930-e9d93e317dd1 // OpenShift 4.3
 	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20191125132246-f6563a70e19a // OpenShift 4.3
+	github.com/openshift/machine-api-operator => github.com/openshift/machine-api-operator v0.2.1-0.20200529045911-d19e8d007f7c
 	k8s.io/api => k8s.io/api v0.17.4
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.17.4
 	k8s.io/apimachinery => k8s.io/apimachinery v0.17.4
@@ -35,7 +36,8 @@ replace (
 
 require (
 	github.com/openshift/api v3.9.1-0.20190924102528-32369d4db2ad+incompatible
-	github.com/openshift/client-go v0.0.0-20190923180330-3b6373338c9b
+	github.com/openshift/client-go v0.0.0-20200326155132-2a6cd50aedd0
+	github.com/openshift/machine-api-operator v0.2.0
 	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200521181434-c9423833fb65
 	github.com/operator-framework/operator-sdk v0.17.0
 	github.com/pkg/errors v0.9.1

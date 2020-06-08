@@ -8,7 +8,7 @@ metadata:
 spec:
   displayName: Windows Machine Config operators
   sourceType: grpc
-  image: REPLACE_IMAGE
+  image: docker.io/ravig/wmco-index:latest
   updateStrategy:
     registryPoll:
       interval: 5m
