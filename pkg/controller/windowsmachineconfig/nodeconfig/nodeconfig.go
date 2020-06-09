@@ -171,8 +171,11 @@ func (nc *nodeConfig) configureNetwork() error {
 	if err := nc.configureCNI(); err != nil {
 		return errors.Wrapf(err, "error configuring CNI for %s", nc.node.GetName())
 	}
+
 	return nil
 }
+
+func (nc )
 
 // applyWorkerLabel applies the worker label to the Windows Node we created.
 func (nc *nodeConfig) applyWorkerLabel() error {

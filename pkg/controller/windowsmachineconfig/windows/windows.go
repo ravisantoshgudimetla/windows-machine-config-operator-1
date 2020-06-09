@@ -37,21 +37,43 @@ const (
 
 var log = logf.Log.WithName("windows")
 
-// Windows is a wrapper for the WindowsVM interface.
-type Windows struct {
+type WindowsWithService interface {
 	types.WindowsVM
+	CreateService() error
+	StartService() error
+	StopService() error
+}
+
+// Windows is a wrapper for the WindowsVM interface.
+type windows struct {
+	types.Windows
 	// workerIgnitionEndpoint is the Machine Config Server(MCS) endpoint from which we can download the
 	// the OpenShift worker ignition file.
 	workerIgnitionEndpoint string
+	services []service
+}
+
+type service struct {
+	createCmd string
+	args string
+	name string
+}
+
+func (vm *windows) CreateService() error {
+
+}
+
+func newServices() []service {
+
 }
 
 // New returns a new instance of windows struct
 func New(vm types.WindowsVM, workerIgnitionEndpoint string) *Windows {
-	return &Windows{WindowsVM: vm, workerIgnitionEndpoint: workerIgnitionEndpoint}
+	return &windows{WindowsVM: vm, workerIgnitionEndpoint: workerIgnitionEndpoint, services: newServices()}
 }
 
 // Configure prepares the Windows VM for the bootstrapper and then runs it
-func (vm *Windows) Configure() error {
+func (vm *windows) Configure() error {
 	// Create the temp directory
 	_, _, err := vm.Run(mkdirCmd(remoteDir), false)
 	if err != nil {
