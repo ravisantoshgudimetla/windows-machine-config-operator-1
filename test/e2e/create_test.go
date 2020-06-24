@@ -2,25 +2,45 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"math"
+	"os"
 	"testing"
 	"time"
 
+	ocv1 "github.com/openshift/api/config/v1"
+	mapiv1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	operator "github.com/openshift/windows-machine-config-operator/pkg/apis/wmc/v1alpha1"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
+	oc "github.com/openshift/windows-machine-config-operator/test/e2e/clusterinfo"
+	awsprovider "github.com/openshift/windows-machine-config-operator/test/e2e/providers/aws"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	"github.com/stretchr/testify/require"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes/scheme"
+	aws "sigs.k8s.io/cluster-api-provider-aws/pkg/apis/awsprovider/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
 	instanceType        = "m5a.large"
 	credentialAccountID = "default"
 	wmcCRName           = "instance"
+	windowsLabel        = "node.openshift.io/os_id"
+)
+
+var (
+	// number of replicas of windows machine to be created
+	replicas = int32(1)
+	// machineSetList keeps a track of all machine sets created
+	machineSetList = []*mapiv1.MachineSet{}
 )
 
 func creationTestSuite(t *testing.T) {
@@ -40,6 +60,166 @@ func creationTestSuite(t *testing.T) {
 	t.Run("Network validation", testNetwork)
 	t.Run("Label validation", func(t *testing.T) { testWorkerLabel(t) })
 	t.Run("NodeTaint validation", func(t *testing.T) { testNodeTaint(t) })
+	t.Run("vmcreate", func(t *testing.T) { testWindowsVMCreation(t) })
+}
+
+func createMachineSet(cloudProviderType ocv1.PlatformType, isWindows bool) (*mapiv1.MachineSet, error) {
+	if cloudProviderType == ocv1.AWSPlatformType {
+		return createAWSMachineSet(isWindows)
+	}
+	return nil, fmt.Errorf("%s cloud proovider is not supported", cloudProviderType)
+}
+
+// createMachineSet creates a machine set with required Windows os_id label
+func createAWSMachineSet(isWindows bool) (*mapiv1.MachineSet, error) {
+	// Create a Machine set and get the condition for it, if it successful or not.
+	// Query the machines associated with the machineset if len(machines) > 1 return machineSet name if not return error
+
+	awsProvider, err := awsprovider.SetupAWSCloudProvider()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get aws cloud provider %v", err)
+	}
+	clusterName, err := awsProvider.GetInfraID()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get infrastructure id %v", err)
+	}
+
+	instanceProfile, err := awsProvider.GetIAMWorkerRole(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get instance profile %v", err)
+	}
+
+	sgID, err := awsProvider.GetClusterWorkerSGID(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get securoty group id: %v", err)
+	}
+
+	subnet, err := awsProvider.GetSubnet(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get subnet: %v", err)
+	}
+
+	region, err := awsProvider.GetOpenshiftRegion()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get region: %v", err)
+	}
+
+	machineSetName := "windows-machineset-"
+	matchLabels := map[string]string{
+		"machine.openshift.io/cluster-api-cluster":    clusterName,
+		"machine.openshift.io/cluster-api-machineset": *subnet.AvailabilityZone,
+	}
+
+	if isWindows {
+		matchLabels[windowsLabel] = "Windows"
+		machineSetName = machineSetName + "with-windows-label-"
+	}
+
+	providerSpec := &aws.AWSMachineProviderConfig{
+		AMI: aws.AWSResourceReference{
+			ID: &awsProvider.ImageID,
+		},
+		InstanceType: awsProvider.InstanceType,
+		IAMInstanceProfile: &aws.AWSResourceReference{
+			ARN: instanceProfile.Arn,
+		},
+		CredentialsSecret: &v1.LocalObjectReference{
+			Name: "aws-cloud-credentials",
+		},
+		SecurityGroups: []aws.AWSResourceReference{
+			{
+				ID: &sgID,
+			},
+		},
+		Subnet: aws.AWSResourceReference{
+			ID: subnet.SubnetId,
+		},
+		// query placement
+		Placement: aws.Placement{
+			region,
+			*subnet.AvailabilityZone,
+		},
+	}
+
+	rawBytes, err := json.Marshal(providerSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set up the test machineSet
+	machineSet := &mapiv1.MachineSet{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: machineSetName,
+			Namespace:    "openshift-machine-api",
+			Labels: map[string]string{
+				mapiv1.MachineClusterIDLabel: clusterName,
+			},
+		},
+		Spec: mapiv1.MachineSetSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: matchLabels,
+			},
+			Replicas: &replicas,
+			Template: mapiv1.MachineTemplateSpec{
+				ObjectMeta: mapiv1.ObjectMeta{Labels: matchLabels},
+				Spec: mapiv1.MachineSpec{
+					ProviderSpec: mapiv1.ProviderSpec{
+						Value: &runtime.RawExtension{
+							Raw: rawBytes,
+						},
+					},
+				},
+			},
+		},
+	}
+	return machineSet, nil
+}
+
+//
+func testWindowsVMCreation(t *testing.T) {
+	testctx, err := NewTestContext(t)
+	require.NoError(t, err)
+	cfg, err := config.GetConfig()
+	require.NoError(t, err)
+	k8sClient, err := client.New(cfg, client.Options{})
+	require.NoError(t, err)
+	openshift, err := oc.GetOpenShift(os.Getenv("KUBECONFIG"))
+	require.NoError(t, err)
+	mapiv1.AddToScheme(scheme.Scheme)
+
+	cloudProvider, err := openshift.GetCloudProvider()
+	require.NoError(t, err)
+
+	testCases := []struct {
+		testCase    string
+		isWindows   bool
+		expectEvent bool
+	}{
+		{
+			testCase:    "Create a Windows VM with label",
+			isWindows:   true,
+			expectEvent: true,
+		},
+		{
+			testCase:    "Create a Windows VM without label",
+			isWindows:   false,
+			expectEvent: false,
+		},
+	}
+
+	for _, test := range testCases {
+		machineSet, err := createMachineSet(cloudProvider.Type, test.isWindows)
+		require.NoError(t, err)
+		err = k8sClient.Create(context.TODO(), machineSet)
+		require.NoError(t, err)
+		machineSetList = append(machineSetList, machineSet)
+		eventsList, err := testctx.kubeclient.CoreV1().Events("openshift-machine-api").List(context.TODO(), metav1.ListOptions{})
+		require.NoError(t, err)
+		for _, event := range eventsList.Items {
+			t.Logf("event: %v", event.Message)
+		}
+	}
+	t.Fatal("close")
 }
 
 // testWindowsNodeCreation tests the Windows node creation in the cluster
