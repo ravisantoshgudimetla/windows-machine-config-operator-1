@@ -14,10 +14,12 @@ import (
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	k8sapierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -177,6 +179,8 @@ type ReconcileWindowsMachineConfig struct {
 	statusMgr *StatusManager
 	// clusterServiceCIDR holds the cluster network service CIDR
 	clusterServiceCIDR string
+	// recorder to generate events
+	recorder record.EventRecorder
 }
 
 // getCloudProvider gathers the cloud provider information and sets the cloudProvider struct field
@@ -220,19 +224,14 @@ func (r *ReconcileWindowsMachineConfig) getCloudProvider(instance *wmcapi.Window
 func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	log.Info("reconciling", "namespace", request.Namespace, "name", request.Name)
 
-	phaseProvisioned := "Provisioned"
 	machineInstance := &mapiv1.Machine{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, machineInstance)
 	if err != nil {
-		log.Info("unable to get instance2 in namespace", "nmspc", request.NamespacedName, "err", err)
+		r.recorder.Event(machineInstance, v1.EventTypeWarning, "Unable to get the machine object", "Unable to get the machine object")
+		log.Info("unable to get machine instance in namespace", "nmspc", request.NamespacedName, "err", err)
 	}
-
-	instanceStatus := machineInstance.Status
-	log.Info("instance state", "state", instanceStatus)
-	if instanceStatus.Phase != &phaseProvisioned {
-		log.Info("MachineStatus", "phase", instanceStatus.Phase)
-		return reconcile.Result{}, nil
-	}
+	r.recorder.Eventf(machineInstance, v1.EventTypeNormal, "Able to get machine object",
+		"Machine %s currently being watched", machineInstance.Name)
 
 	// Fetch the WindowsMachineConfig instance
 	instance := &wmcapi.WindowsMachineConfig{}
