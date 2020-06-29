@@ -7,6 +7,11 @@ import (
 	"os"
 )
 
+const (
+	// instanceType is the AWS specific instance type to create the VM with
+	instanceType = "m4.large"
+)
+
 // setupAWSCloudProvider creates AWS provider using the give OpenShift client
 // This is the first step of the e2e test and fails the test upon error.
 func setupAWSCloudProvider() (*providers.AwsProvider, error) {
@@ -16,8 +21,6 @@ func setupAWSCloudProvider() (*providers.AwsProvider, error) {
 	}
 	// awsCredentials is set by OpenShift CI
 	awsCredentials := os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
-	// instanceType is the AWS specific instance type to create the VM with
-	instanceType := "m4.large"
 
 	awsProvider, err := providers.NewAWSProvider(oc, awsCredentials, "default", instanceType)
 	if err != nil {

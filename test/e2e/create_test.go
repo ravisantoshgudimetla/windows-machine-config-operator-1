@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	instanceType        = "m5a.large"
+	//instanceType        = "m5a.large"
 	credentialAccountID = "default"
 	wmcCRName           = "instance"
 	windowsLabel        = "node.openshift.io/os_id"
@@ -39,7 +39,10 @@ const (
 var (
 	// awsProvider is setup as a variable for interacting with AWS SDK
 	awsProvider = &providers.AwsProvider{}
-	replicas    = int32(1)
+	// number of replicas of windows machine to be created
+	replicas = int32(1)
+	// machineSetList keeps a track of all machine sets created
+	machineSetList = []*mapiv1.MachineSet{}
 )
 
 func creationTestSuite(t *testing.T) {
@@ -64,25 +67,39 @@ func creationTestSuite(t *testing.T) {
 }
 
 // createMachineSet creates a machine set with required Windows os_id label
-func createAWSMachineSet(isWindows bool) (string, error) {
+func createAWSMachineSet(isWindows bool) (*mapiv1.MachineSet, error) {
 	// Create a Machine set and get the condition for it, if it successful or not.
 	// Query the machines associated with the machineset if len(machines) > 1 return machineSet name if not return error
-	cfg, err := config.GetConfig()
-	if err != nil {
-		return "", err
-	}
 
 	clusterName, err := awsProvider.GetInfraID()
 	if err != nil {
-		return "", fmt.Errorf("unable to get infrastructure id %v", err)
+		return nil, fmt.Errorf("unable to get infrastructure id %v", err)
 	}
 
-	k8sClient, err := client.New(cfg, client.Options{})
+	instanceProfile, err := awsProvider.GetIAMWorkerRole(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get instance profile %v", err)
+	}
+
+	sgID, err := awsProvider.GetClusterWorkerSGID(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get securoty group id: %v", err)
+	}
+
+	subnet, err := awsProvider.GetSubnet(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get subnet: %v", err)
+	}
+
+	region, err := awsProvider.GetOpenshiftRegion()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get region: %v", err)
+	}
 
 	machineSetName := "windows-machineset-"
 	matchLabels := map[string]string{
 		"machine.openshift.io/cluster-api-cluster":    clusterName,
-		"machine.openshift.io/cluster-api-machineset": clusterName + "-worker-us-east-2c",
+		"machine.openshift.io/cluster-api-machineset": *subnet.AvailabilityZone,
 	}
 
 	if isWindows {
@@ -90,30 +107,11 @@ func createAWSMachineSet(isWindows bool) (string, error) {
 		machineSetName = machineSetName + "with-windows-label-"
 	}
 
-	instanceProfile, err := awsProvider.GetIAMWorkerRole(clusterName)
-	if err != nil {
-		return "", fmt.Errorf("unable to get instance profile %v", err)
-	}
-
-	sgID, err := awsProvider.GetClusterWorkerSGID(clusterName)
-	if err != nil {
-		return "", fmt.Errorf("unable to get securoty group id: %v", err)
-	}
-
-	subnet, err := awsProvider.GetSubnet(clusterName)
-	if err != nil {
-		return "", fmt.Errorf("unable to get subnet: %v", err)
-	}
-	region, err := awsProvider.GetOpenshiftRegion()
-	if err != nil {
-		return "", fmt.Errorf("unable to get region: %v", err)
-	}
-
 	providerSpec := &aws.AWSMachineProviderConfig{
 		AMI: aws.AWSResourceReference{
 			ID: &awsProvider.ImageID,
 		},
-		InstanceType: instanceType,
+		InstanceType: awsProvider.InstanceType,
 		IAMInstanceProfile: &aws.AWSResourceReference{
 			ARN: instanceProfile.Arn,
 		},
@@ -137,10 +135,9 @@ func createAWSMachineSet(isWindows bool) (string, error) {
 
 	rawBytes, err := json.Marshal(providerSpec)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	mapiv1.AddToScheme(scheme.Scheme)
 	// Set up the test machineSet
 	machineSet := &mapiv1.MachineSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -167,36 +164,49 @@ func createAWSMachineSet(isWindows bool) (string, error) {
 			},
 		},
 	}
-	err = k8sClient.Create(context.TODO(), machineSet)
-	if err != nil {
-		return "", err
-	}
-	return "", nil
+	return machineSet, nil
 }
 
 //
 func testWindowsVMCreation(t *testing.T) {
 
+	cfg, err := config.GetConfig()
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	k8sClient, err := client.New(cfg, client.Options{})
+
 	oc, err := clientset.GetOpenShift(os.Getenv("KUBECONFIG"))
 	if err != nil {
 		t.Errorf("%v", err)
 	}
+	mapiv1.AddToScheme(scheme.Scheme)
 
 	cloudProvider, err := oc.GetCloudProvider()
-	if cloudProvider.Type != ocv1.AWSPlatformType {
-		t.Errorf("cloud provider %s not supported", cloudProvider.Type)
-	}
-
 	if cloudProvider.Type == ocv1.AWSPlatformType {
 		awsProvider, err = setupAWSCloudProvider()
-		_, err = createAWSMachineSet(false)
+		machineSetNoLabel, err := createAWSMachineSet(false)
 		if err != nil {
 			t.Fatalf("failed to create machine sets %v", err)
 		}
-		_, err = createAWSMachineSet(true)
+		err = k8sClient.Create(context.TODO(), machineSetNoLabel)
 		if err != nil {
-			t.Fatal("failes to create  machine sets ")
+			t.Fatalf("failed to create machine sets %v", err)
 		}
+		machineSetList = append(machineSetList, machineSetNoLabel)
+		//err = k8sClient.Delete(context.TODO(), machineSetNoLabel)
+		//if err != nil {
+		//	t.Fatalf("failed to create machine sets %v", err)
+		//}
+		machineSetWithLabel, err := createAWSMachineSet(true)
+		if err != nil {
+			t.Fatal("failed to create  machine sets ")
+		}
+		err = k8sClient.Create(context.TODO(), machineSetWithLabel)
+		if err != nil {
+			t.Fatalf("failed to create machine sets %v", err)
+		}
+		machineSetList = append(machineSetList, machineSetNoLabel)
 		t.Fatal("created machine sets ")
 	}
 

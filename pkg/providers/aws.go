@@ -24,7 +24,7 @@ type AwsProvider struct {
 	// imageID is the AMI image-id to be used for creating Virtual Machine
 	ImageID string
 	// instanceType is the flavor of VM to be used
-	instanceType string
+	InstanceType string
 	// A client for IAM.
 	IAM *iam.IAM
 	// A client for EC2. to query Windows AMI images
@@ -157,14 +157,14 @@ func (a *AwsProvider) GetSubnet(infraID string) (*ec2.Subnet, error) {
 			},
 		},
 		IncludeMarketplace: &f,
-		InstanceType:       &a.instanceType,
+		InstanceType:       &a.InstanceType,
 		ProductDescription: &productDescription,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error checking instance offerings of %s: %v", a.instanceType, err)
+		return nil, fmt.Errorf("error checking instance offerings of %s: %v", a.InstanceType, err)
 	}
 	if offerings.ReservedInstancesOfferings == nil {
-		return nil, fmt.Errorf("no instance offerings returned for %s", a.instanceType)
+		return nil, fmt.Errorf("no instance offerings returned for %s", a.InstanceType)
 	}
 
 	// Finding required subnet within the vpc.
@@ -192,7 +192,7 @@ func (a *AwsProvider) GetSubnet(infraID string) (*ec2.Subnet, error) {
 	err = fmt.Errorf("could not find the required subnet in VPC: %v", *vpc.VpcId)
 	if !foundSubnet {
 		err = fmt.Errorf("could not find the required subnet in a zone that supports %s instance type",
-			a.instanceType)
+			a.InstanceType)
 	}
 	return nil, err
 }
