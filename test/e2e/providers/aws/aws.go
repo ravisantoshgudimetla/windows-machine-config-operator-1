@@ -2,6 +2,11 @@ package providers
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	awssession "github.com/aws/aws-sdk-go/aws/session"
@@ -9,10 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/openshift/windows-machine-config-operator/pkg/client"
-	"log"
-	"os"
-	"strings"
-	"time"
 )
 
 const (

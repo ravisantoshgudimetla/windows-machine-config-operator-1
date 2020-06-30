@@ -3,7 +3,8 @@ package client
 import (
 	"context"
 	"fmt"
-	"github.com/openshift/api/config/v1"
+
+	v1 "github.com/openshift/api/config/v1"
 	clientset "github.com/openshift/client-go/config/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"

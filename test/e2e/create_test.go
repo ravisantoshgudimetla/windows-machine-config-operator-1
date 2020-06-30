@@ -4,29 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/openshift/windows-machine-config-operator/pkg/providers"
-	"k8s.io/apimachinery/pkg/runtime"
 	"log"
 	"math"
 	"os"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"testing"
 	"time"
 
 	ocv1 "github.com/openshift/api/config/v1"
 	mapiv1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	operator "github.com/openshift/windows-machine-config-operator/pkg/apis/wmc/v1alpha1"
-	clientset "github.com/openshift/windows-machine-config-operator/pkg/client"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
+	"github.com/openshift/windows-machine-config-operator/test/e2e/clusterinfo"
+	awsprovider "github.com/openshift/windows-machine-config-operator/test/e2e/providers/aws"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	"github.com/stretchr/testify/require"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
 	aws "sigs.k8s.io/cluster-api-provider-aws/pkg/apis/awsprovider/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
@@ -38,7 +38,7 @@ const (
 
 var (
 	// awsProvider is setup as a variable for interacting with AWS SDK
-	awsProvider = &providers.AwsProvider{}
+	awsProvider = &awsprovider.AwsProvider{}
 	// number of replicas of windows machine to be created
 	replicas = int32(1)
 	// machineSetList keeps a track of all machine sets created
@@ -176,7 +176,7 @@ func testWindowsVMCreation(t *testing.T) {
 	}
 	k8sClient, err := client.New(cfg, client.Options{})
 
-	oc, err := clientset.GetOpenShift(os.Getenv("KUBECONFIG"))
+	oc, err := clusterinfo.GetOpenShift(os.Getenv("KUBECONFIG"))
 	if err != nil {
 		t.Errorf("%v", err)
 	}
