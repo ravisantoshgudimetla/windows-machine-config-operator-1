@@ -74,6 +74,7 @@ rules:
  - apiGroups:
    - ""
    resources:
+   - events
    - nodes
    verbs:
    - "*"
@@ -128,17 +129,4 @@ rules:
      - '*'
    verbs:
      - '*'
-#---
-#apiVersion: rbac.authorization.k8s.io/v1
-#kind: Role
-#metadata:
-#  name : windows-openshift-machine-api
-#  namespace: openshift-machine-api
-#rules:
-#  - apiGroups:
-#      - "machine.openshift.io"
-#    resources:
-#      - "*"
-#    verbs:
-#      - list
-#      - get
+

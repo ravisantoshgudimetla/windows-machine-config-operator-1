@@ -16,6 +16,7 @@ func deletionTestSuite(t *testing.T) {
 	t.Run("Status", func(t *testing.T) { testStatusWhenSuccessful(t) })
 	t.Run("ConfigMap validation", func(t *testing.T) { testConfigMapValidation(t) })
 	t.Run("Secrets validation", func(t *testing.T) { testValidateSecrets(t) })
+//	t.Run("Cleanup MachineSets", func(t *testing.T) { testMachineSetDeletion(t) })
 }
 
 // testWindowsNodeDeletion tests the Windows node deletion from the cluster.
@@ -48,3 +49,15 @@ func testWindowsNodeDeletion(t *testing.T) {
 		t.Fatalf("windows node deletion failed  with %v", err)
 	}
 }
+
+//func testMachineSetDeletion(t *testing.T) {
+//	cfg, err := config.GetConfig()
+//	require.NoError(t, err)
+//	k8sClient, err := client.New(cfg, client.Options{})
+//	require.NoError(t, err)
+//
+//	for _, machineSet := range machineSetList {
+//		err = k8sClient.Delete(context.TODO(), machineSet)
+//		require.NoError(t, err)
+//	}
+//}

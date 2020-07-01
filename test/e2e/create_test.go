@@ -11,7 +11,7 @@ import (
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	"github.com/stretchr/testify/require"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -23,6 +23,13 @@ const (
 	wmcCRName           = "instance"
 )
 
+//var (
+//	// number of replicas of windows machine to be created
+//	replicas = int32(1)
+//	// machineSetList keeps a track of all machine sets created
+//	machineSetList = []*mapiv1.MachineSet{}
+//)
+
 func creationTestSuite(t *testing.T) {
 	// The order of tests here are important. testValidateSecrets is what populates the windowsVMs slice in the gc.
 	// testNetwork needs that to check if the HNS networks have been installed. Ideally we would like to run testNetwork
@@ -30,17 +37,97 @@ func creationTestSuite(t *testing.T) {
 	// are the secrets but they are created only after the VMs have been fully configured.
 	// Any node object related tests should be run only after testNodeCreation as that initializes the node objects in
 	// the global context.
-	t.Run("WMC CR validation", testWMCValidation)
-	// the failure behavior test will be skipped if gc.nodes = 0
-	t.Run("failure behavior", testFailureSuite)
-	t.Run("Creation", func(t *testing.T) { testWindowsNodeCreation(t) })
-	t.Run("Status", func(t *testing.T) { testStatusWhenSuccessful(t) })
-	t.Run("ConfigMap validation", func(t *testing.T) { testConfigMapValidation(t) })
-	t.Run("Secrets validation", func(t *testing.T) { testValidateSecrets(t) })
-	t.Run("Network validation", testNetwork)
-	t.Run("Label validation", func(t *testing.T) { testWorkerLabel(t) })
-	t.Run("NodeTaint validation", func(t *testing.T) { testNodeTaint(t) })
+	//t.Run("WMC CR validation", testWMCValidation)
+	//// the failure behavior test will be skipped if gc.nodes = 0
+	//t.Run("failure behavior", testFailureSuite)
+	//t.Run("Creation", func(t *testing.T) { testWindowsNodeCreation(t) })
+	//t.Run("Status", func(t *testing.T) { testStatusWhenSuccessful(t) })
+	//t.Run("ConfigMap validation", func(t *testing.T) { testConfigMapValidation(t) })
+	//t.Run("Secrets validation", func(t *testing.T) { testValidateSecrets(t) })
+	//t.Run("Network validation", testNetwork)
+	//t.Run("Label validation", func(t *testing.T) { testWorkerLabel(t) })
+	//t.Run("NodeTaint validation", func(t *testing.T) { testNodeTaint(t) })
+	t.Run("machineCreation", func(t *testing.T) { testWindowsMachineCreation(t) })
 }
+
+// testWindowsMachineCreation tests the creation of the Windows machines and checks if WMCO is properly watching
+// for the Windows machines created
+func testWindowsMachineCreation(t *testing.T) {
+	testCtx, err := NewTestContext(t)
+	require.NoError(t, err)
+	//defer testCtx.cleanup()
+	testCases := []struct {
+		testCase    string
+		isWindows   bool
+		expectEvent bool
+	}{
+		{
+			testCase:    "Create a Windows VM with label",
+			isWindows:   true,
+			expectEvent: true,
+		},
+		{
+			testCase:    "Create a Windows VM without label",
+			isWindows:   false,
+			expectEvent: false,
+		},
+	}
+
+	for _, test := range testCases {
+		machineSet, err := testCtx.CloudProvider.GenerateMachineSet(test.isWindows)
+		require.NoError(t, err)
+		err = framework.Global.Client.Create(context.TODO(), machineSet,
+			&framework.CleanupOptions{TestContext: testCtx.osdkTestCtx, Timeout: cleanupTimeout,
+				RetryInterval: cleanupRetryInterval})
+		require.NoError(t, err)
+	}
+	eventsList, err := testCtx.kubeclient.CoreV1().Events("openshift-machine-api").List(context.TODO(), metav1.ListOptions{})
+	require.NoError(t, err)
+	for _, event := range eventsList.Items {
+		t.Logf("event: %v", event.Message)
+	}
+}
+
+// waitForProvisionedEvents waits for the machine provisioned event,
+//func (tc *testContext) waitForProvisionedEvent() {
+//
+//	err := wait.Poll(nodeRetryInterval, time.Duration(math.Max(float64(nodeCount), 1))*nodeCreationTime, func() (done bool, err error) {
+//		nodes, err = tc.kubeclient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: nodeconfig.WindowsOSLabel})
+//		if err != nil {
+//			if apierrors.IsNotFound(err) {
+//				log.Printf("waiting for %d Windows nodes", gc.numberOfNodes)
+//				return false, nil
+//			}
+//			return false, err
+//		}
+//		if len(nodes.Items) != nodeCount {
+//			log.Printf("waiting for %d/%d Windows nodes", len(nodes.Items), gc.numberOfNodes)
+//			return false, nil
+//		}
+//		if !waitForAnnotations {
+//			return true, nil
+//		}
+//		// Wait for annotations to be present on the node objects in the scale up caseoc
+//		if nodeCount != 0 {
+//			log.Printf("waiting for annotations to be present on %d Windows nodes", nodeCount)
+//		}
+//		for _, node := range nodes.Items {
+//			for _, annotation := range annotations {
+//				_, found := node.Annotations[annotation]
+//				if !found {
+//					return false, nil
+//				}
+//			}
+//		}
+//
+//		return true, nil
+//	})
+//	eventsList, err := tc.kubeclient.CoreV1().Events("openshift-machine-api").List(context.TODO(), metav1.ListOptions{})
+//	require.NoError(t, err)
+//	for _, event := range eventsList.Items {
+//		t.Logf("event: %v", event.Message)
+//	}
+//}
 
 // testWindowsNodeCreation tests the Windows node creation in the cluster
 func testWindowsNodeCreation(t *testing.T) {
