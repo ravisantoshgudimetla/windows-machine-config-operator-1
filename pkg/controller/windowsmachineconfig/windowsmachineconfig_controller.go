@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	mapiv1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	wmcapi "github.com/openshift/windows-machine-config-operator/pkg/apis/wmc/v1alpha1"
@@ -15,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -78,6 +82,7 @@ func newReconciler(mgr manager.Manager, clusterServiceCIDR string) (reconcile.Re
 			tracker:            vmTracker,
 			windowsVMs:         windowsVMs,
 			clusterServiceCIDR: clusterServiceCIDR,
+			recorder:           mgr.GetEventRecorderFor("wmc-controller"),
 		},
 		nil
 }
@@ -99,6 +104,33 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	if err != nil {
 		return errors.Wrap(err, "could not create watch on WindowsMachineConfig objects")
 	}
+	// Watch for the machine objects
+	windowsOSLabel := "node.openshift.io/os_id"
+	predicateFilter := predicate.Funcs{
+		// ignore create event for all machines as wmco should for machine getting provisioned
+		CreateFunc: func(e event.CreateEvent) bool {
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			labels := e.MetaNew.GetLabels()
+			if _, ok := labels[windowsOSLabel]; ok {
+				return true
+			}
+			return false
+		},
+		// ignore delete event for all machines as wmco does not react to node getting deleted
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return false
+		},
+	}
+
+	err = c.Watch(&source.Kind{Type: &mapiv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "openshift-machine-api"},
+	}}, &handler.EnqueueRequestForObject{}, predicateFilter)
+	if err != nil {
+		return errors.Wrap(err, "could not create watch on Machine objects")
+	}
+
 	return nil
 }
 
@@ -124,6 +156,8 @@ type ReconcileWindowsMachineConfig struct {
 	statusMgr *StatusManager
 	// clusterServiceCIDR holds the cluster network service CIDR
 	clusterServiceCIDR string
+	// recorder to generate events
+	recorder record.EventRecorder
 }
 
 // getCloudProvider gathers the cloud provider information and sets the cloudProvider struct field
@@ -166,10 +200,43 @@ func (r *ReconcileWindowsMachineConfig) getCloudProvider(instance *wmcapi.Window
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	log.Info("reconciling", "namespace", request.Namespace, "name", request.Name)
+	mayBeWMCOobject := false
+	// Fetch the machine instance
+	machine := &mapiv1.Machine{}
+	provisionedPhase := "Provisioned"
+	err := r.client.Get(context.TODO(), request.NamespacedName, machine)
+	if err != nil {
+		mayBeWMCOobject = true
+		// TODO: Remove this when we switch to machine-api completely
+		//if k8sapierrors.IsNotFound(err) {
+		//	// Request object not found, could have been deleted after reconcile request.
+		//	// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+		//	// Return and don't requeue
+		//
+		//	return reconcile.Result{}, nil
+		//
+		//}
+		//// Error reading the object - requeue the request.
+		//return reconcile.Result{}, err
+	}
+	if mayBeWMCOobject {
+		goto WMCO
+	}
 
+	if machine.Status.Phase == nil {
+		// Phase can be nil and should be ignored by WMCO
+		return reconcile.Result{}, nil
+	}
+	if *machine.Status.Phase != provisionedPhase {
+		// If the Machine is not in provisioned state, WMCO shouldn't care about it
+		return reconcile.Result{}, nil
+	}
+	r.recorder.Eventf(machine, corev1.EventTypeNormal, "WMCO Update",
+		"Machine %s Provisioned Successfully", machine.Name)
+WMCO:
 	// Fetch the WindowsMachineConfig instance
 	instance := &wmcapi.WindowsMachineConfig{}
-	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
+	err = r.client.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
 		if k8sapierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
