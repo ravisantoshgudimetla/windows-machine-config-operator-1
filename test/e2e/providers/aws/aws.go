@@ -1,6 +1,7 @@
-package providers
+package aws
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,13 +14,22 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
 	"github.com/aws/aws-sdk-go/service/iam"
+	mapiv1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	"github.com/openshift/windows-machine-config-operator/test/e2e/clusterinfo"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	awsprovider "sigs.k8s.io/cluster-api-provider-aws/pkg/apis/awsprovider/v1beta1"
 )
 
 const (
 	infraIDTagKeyPrefix = "kubernetes.io/cluster/"
 	infraIDTagValue     = "owned"
+	windowsLabel        = "node.openshift.io/os_id"
 )
+
+// number of replicas of windows machine to be created
+var replicas = int32(1)
 
 type AwsProvider struct {
 	// imageID is the AMI image-id to be used for creating Virtual Machine
@@ -31,7 +41,9 @@ type AwsProvider struct {
 	// A client for EC2. to query Windows AMI images
 	EC2 ec2iface.EC2API
 	// openShiftClient is the client of the existing OpenShift cluster.
-	openShiftClient *client.OpenShift
+	openShiftClient *clusterinfo.OpenShift
+	// region in which the Machine needs to be created
+	region string
 }
 
 // newSession uses AWS credentials to create and returns a session for interacting with EC2.
@@ -49,12 +61,8 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // credentialPath is the file path the AWS credentials file.
 // credentialAccountID is the account name the user uses to create VM instance.
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
-func NewAWSProvider(openShiftClient *client.OpenShift, credentialPath, credentialAccountID, instanceType string) (*AwsProvider, error) {
-	provider, err := openShiftClient.GetCloudProvider()
-	if err != nil {
-		return nil, err
-	}
-	session, err := newSession(credentialPath, credentialAccountID, provider.AWS.Region)
+func NewAWSProvider(openShiftClient *clusterinfo.OpenShift, credentialPath, credentialAccountID, instanceType, region string) (*AwsProvider, error) {
+	session, err := newSession(credentialPath, credentialAccountID, region)
 	if err != nil {
 		return nil, fmt.Errorf("could not create new AWS session: %v", err)
 	}
@@ -72,6 +80,7 @@ func NewAWSProvider(openShiftClient *client.OpenShift, credentialPath, credentia
 		iamClient,
 		ec2Client,
 		openShiftClient,
+		region,
 	}, nil
 }
 
@@ -247,12 +256,8 @@ func (a *AwsProvider) getVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 	return res.Vpcs[0], nil
 }
 
-func (a *AwsProvider) GetOpenshiftRegion() (string, error) {
-	provider, err := a.openShiftClient.GetCloudProvider()
-	if err != nil {
-		return "", err
-	}
-	return provider.AWS.Region, nil
+func (a *AwsProvider) GetOpenshiftRegion() string {
+	return a.region
 }
 
 // GetIAMWorkerRole gets worker IAM information from the existing cluster including IAM arn or an error.
@@ -267,4 +272,97 @@ func (a *AwsProvider) GetIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileS
 	return &ec2.IamInstanceProfileSpecification{
 		Arn: iamspc.InstanceProfile.Arn,
 	}, nil
+}
+
+// GenerateMachineSet generates the machineset object which is aws provider specific
+func (a *AwsProvider) GenerateMachineSet(withWindowsLabel bool) (*mapiv1.MachineSet, error) {
+	clusterName, err := a.GetInfraID()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get infrastructure id %v", err)
+	}
+
+	instanceProfile, err := a.GetIAMWorkerRole(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get instance profile %v", err)
+	}
+
+	sgID, err := a.GetClusterWorkerSGID(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get securoty group id: %v", err)
+	}
+
+	subnet, err := a.GetSubnet(clusterName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get subnet: %v", err)
+	}
+
+	machineSetName := "windows-machineset"
+	matchLabels := map[string]string{
+		"machine.openshift.io/cluster-api-cluster":    clusterName,
+		"machine.openshift.io/cluster-api-machineset": *subnet.AvailabilityZone,
+	}
+
+	if withWindowsLabel {
+		matchLabels[windowsLabel] = "Windows"
+		machineSetName = machineSetName + "-with-windows-label"
+	}
+
+	providerSpec := &awsprovider.AWSMachineProviderConfig{
+		AMI: awsprovider.AWSResourceReference{
+			ID: &a.ImageID,
+		},
+		InstanceType: a.InstanceType,
+		IAMInstanceProfile: &awsprovider.AWSResourceReference{
+			ARN: instanceProfile.Arn,
+		},
+		CredentialsSecret: &v1.LocalObjectReference{
+			Name: "aws-cloud-credentials",
+		},
+		SecurityGroups: []awsprovider.AWSResourceReference{
+			{
+				ID: &sgID,
+			},
+		},
+		Subnet: awsprovider.AWSResourceReference{
+			ID: subnet.SubnetId,
+		},
+		// query placement
+		Placement: awsprovider.Placement{
+			a.region,
+			*subnet.AvailabilityZone,
+		},
+	}
+
+	rawBytes, err := json.Marshal(providerSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set up the test machineSet
+	machineSet := &mapiv1.MachineSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: machineSetName,
+			Namespace:    "openshift-machine-api",
+			Labels: map[string]string{
+				mapiv1.MachineClusterIDLabel: clusterName,
+			},
+		},
+		Spec: mapiv1.MachineSetSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: matchLabels,
+			},
+			Replicas: &replicas,
+			Template: mapiv1.MachineTemplateSpec{
+				ObjectMeta: mapiv1.ObjectMeta{Labels: matchLabels},
+				Spec: mapiv1.MachineSpec{
+					ProviderSpec: mapiv1.ProviderSpec{
+						Value: &runtime.RawExtension{
+							Raw: rawBytes,
+						},
+					},
+				},
+			},
+		},
+	}
+	return machineSet, nil
 }

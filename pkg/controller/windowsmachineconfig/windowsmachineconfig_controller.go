@@ -104,31 +104,11 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	if err != nil {
 		return errors.Wrap(err, "could not create watch on WindowsMachineConfig objects")
 	}
-
+	// Watch for the machine objects
 	windowsOSLabel := "node.openshift.io/os_id"
 	predicateFilter := predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
-			labels := e.Meta.GetLabels()
-			if _, ok := labels[windowsOSLabel]; ok {
-				return true
-			}
-			return false
-		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			labels := e.MetaNew.GetLabels()
-			// using resource version in place of generation as generation wont get updated after machine
-			// is transitioned from `provisioning` to `provisioned`
-			if e.MetaNew.GetResourceVersion() == e.MetaOld.GetResourceVersion() {
-				log.Info("Same Resource Versions", e.MetaNew.GetResourceVersion(), e.MetaOld.GetResourceVersion())
-				return false
-			}
-			if _, ok := labels[windowsOSLabel]; ok {
-				return true
-			}
-			return false
-		},
-		GenericFunc: func(e event.GenericEvent) bool {
-			labels := e.Meta.GetLabels()
 			if _, ok := labels[windowsOSLabel]; ok {
 				return true
 			}
@@ -212,34 +192,31 @@ func (r *ReconcileWindowsMachineConfig) getCloudProvider(instance *wmcapi.Window
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	log.Info("reconciling", "namespace", request.Namespace, "name", request.Name)
-	windowsOSLabel := "node.openshift.io/os_id"
-	allMachines := &mapiv1.MachineList{}
 
-	err := r.client.List(context.TODO(), allMachines, client.InNamespace(request.Namespace), client.HasLabels{windowsOSLabel})
+	// Fetch the machine instance
+	machine := &mapiv1.Machine{}
+	err := r.client.Get(context.TODO(), request.NamespacedName, machine)
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to list machines: %v", err)
-	}
-
-	provisionedMachines := []mapiv1.Machine{}
-
-	phaseProvisioned := "Provisioned"
-
-	for machine := range allMachines.Items {
-		instanceStatus := allMachines.Items[machine].Status
-		if instanceStatus.Phase == nil {
-			continue
+		if k8sapierrors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
 		}
-		instancePhase := *instanceStatus.Phase
-		if instancePhase == phaseProvisioned {
-			provisionedMachines = append(provisionedMachines, allMachines.Items[machine])
-		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
 	}
-
-	for machine := range provisionedMachines {
-		instance := provisionedMachines[machine]
-		r.recorder.Eventf(&instance, corev1.EventTypeNormal, "Windows Machine",
-			"Machine %s Provisioned Successfully", instance.Name)
+	provisionedPhase := "Provisioned"
+	if machine.Status.Phase == nil {
+		// Phase can be nil and should be ignored by WMCO
+		return reconcile.Result{}, nil
 	}
+	if *machine.Status.Phase != provisionedPhase {
+		// If the Machine is not in provisioned state, WMCO shouldn't care about it
+		return reconcile.Result{}, nil
+	}
+	r.recorder.Eventf(machine, corev1.EventTypeNormal, "Windows Machine Configuration in progress",
+		"Machine %s Provisioned Successfully", machine.Name)
 
 	// Fetch the WindowsMachineConfig instance
 	instance := &wmcapi.WindowsMachineConfig{}

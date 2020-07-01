@@ -1,4 +1,4 @@
-package client
+package clusterinfo
 
 import (
 	"context"
