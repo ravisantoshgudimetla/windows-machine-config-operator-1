@@ -13,7 +13,7 @@ import (
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -42,7 +42,7 @@ func creationTestSuite(t *testing.T) {
 	t.Run("Network validation", testNetwork)
 	t.Run("Label validation", func(t *testing.T) { testWorkerLabel(t) })
 	t.Run("NodeTaint validation", func(t *testing.T) { testNodeTaint(t) })
-	t.Run("machineCreation", func(t *testing.T) { testWindowsMachineCreation(t) })
+	t.Run("Machine Creation", func(t *testing.T) { testWindowsMachineCreation(t) })
 }
 
 // testWindowsMachineCreation tests the creation of the Windows machines and checks if WMCO is properly watching
@@ -87,16 +87,11 @@ func (tc *testContext) waitForProvisionedEvent(expectedEventCount int, machineSe
 	var actualEventCount int
 	timeOut := 2 * time.Minute
 	startTime := time.Now()
-	for i := 0; ; i++ {
-		currTime := time.Since(startTime)
-		if currTime >= timeOut {
-			break
-		}
+	for i := 0; time.Since(startTime) < timeOut; i++ {
 		eventsList, err := tc.kubeclient.CoreV1().Events("openshift-machine-api").List(context.TODO(),
 			metav1.ListOptions{})
 		if err != nil {
-			log.Printf("event list failed: %v", err)
-			continue
+			return errors.Errorf("event list failed: %v", err)
 		}
 		actualEventCount = 0
 		for _, event := range eventsList.Items {

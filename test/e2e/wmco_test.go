@@ -49,8 +49,7 @@ func setupWMCOResources() error {
 		return errors.Wrap(err, "failed setting up test suite")
 	}
 	// Register the machine api to create machine objects from framework's client
-	machineSetList := &mapiv1.MachineSetList{}
-	err = framework.AddToFrameworkScheme(mapiv1.AddToScheme, machineSetList)
+	err = framework.AddToFrameworkScheme(mapiv1.AddToScheme, &mapiv1.MachineSetList{})
 	if err != nil {
 		return errors.Wrap(err, "failed adding machine api scheme")
 	}

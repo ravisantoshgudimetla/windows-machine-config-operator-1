@@ -2,8 +2,6 @@ package providers
 
 import (
 	"fmt"
-	"os"
-
 	v1 "github.com/openshift/api/config/v1"
 	mapiv1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	oc "github.com/openshift/windows-machine-config-operator/test/e2e/clusterinfo"
@@ -16,7 +14,7 @@ type CloudProvider interface {
 }
 
 func NewCloudProvider() (CloudProvider, error) {
-	openshift, err := oc.GetOpenShift(os.Getenv("KUBECONFIG"))
+	openshift, err := oc.GetOpenShift()
 	if err != nil {
 		return nil, errors.Wrap(err, "Getting OpenShift client failed")
 	}

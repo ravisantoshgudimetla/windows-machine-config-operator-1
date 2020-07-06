@@ -26,7 +26,7 @@ import (
 const (
 	infraIDTagKeyPrefix = "kubernetes.io/cluster/"
 	infraIDTagValue     = "owned"
-	windowsLabel        = "node.openshift.io/os_id"
+	windowsLabel        = "machine.openshift.io/os_id"
 	// instanceType is the AWS specific instance type to create the VM with
 	instanceType = "m5a.large"
 )
@@ -64,6 +64,8 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // credentialPath is the file path the AWS credentials file.
 // credentialAccountID is the account name the user uses to create VM instance.
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
+// instanceType is the type of aws instance that needs to be created.
+// region is the region where the cluster is hosted.
 func newAWSProvider(openShiftClient *clusterinfo.OpenShift, credentialPath,
 	credentialAccountID, instanceType, region string) (*awsProvider, error) {
 	session, err := newSession(credentialPath, credentialAccountID, region)
@@ -91,7 +93,7 @@ func newAWSProvider(openShiftClient *clusterinfo.OpenShift, credentialPath,
 // SetupAWSCloudProvider creates AWS provider using the give OpenShift client
 // This is the first step of the e2e test and fails the test upon error.
 func SetupAWSCloudProvider(region string) (*awsProvider, error) {
-	oc, err := clusterinfo.GetOpenShift(os.Getenv("KUBECONFIG"))
+	oc, err := clusterinfo.GetOpenShift()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize OpenShift client with error: %v", err)
 	}
@@ -105,8 +107,7 @@ func SetupAWSCloudProvider(region string) (*awsProvider, error) {
 	return awsProvider, nil
 }
 
-// getInfraID returns the infrastructure ID associated with the OpenShift cluster. This is public for
-// testing purposes as of now.
+// getInfraID returns the infrastructure ID associated with the OpenShift cluster.
 func (a *awsProvider) getInfraID() (string, error) {
 	infraID, err := a.openShiftClient.GetInfrastructureID()
 	if err != nil {
@@ -204,7 +205,7 @@ func (a *awsProvider) getSubnet(infraID string) (*ec2.Subnet, error) {
 
 	for _, subnet := range subnets.Subnets {
 		for _, tag := range subnet.Tags {
-			// TODO: find public subnet by checking igw gateway in routing.
+			// TODO: find private subnet by checking igw gateway in routing.
 			if *tag.Key == "Name" && strings.Contains(*tag.Value, infraID+requiredSubnet) {
 				foundSubnet = true
 				// Ensure that the instance type we want is supported in the zone that the subnet is in
