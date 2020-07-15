@@ -39,7 +39,7 @@ type testVM struct {
 //     in this struct is not guaranteed to be latest from the apiserver.
 type globalContext struct {
 	// numberOfNodes to be used for the test suite.
-	numberOfNodes int
+	numberOfNodes int32
 	// nodes are the Windows nodes created by the operator
 	nodes []v1.Node
 	// skipNodeDeletion allows the Windows nodes to hang around after the test suite has been run.

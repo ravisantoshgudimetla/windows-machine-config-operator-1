@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	operator "github.com/openshift/windows-machine-config-operator/pkg/apis/wmc/v1alpha1"
 	wmc "github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig"
 	nc "github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
@@ -39,7 +38,7 @@ func (tc *testContext) waitForTrackerConfigMap() error {
 			}
 			return false, err
 		}
-		if len(trackerConfigMap.BinaryData) == gc.numberOfNodes {
+		if len(trackerConfigMap.BinaryData) == int(gc.numberOfNodes) {
 			log.Printf("%s/%s ConfigMap tracking required number of nodes", tc.namespace, wmc.StoreName)
 			return true, nil
 		}
@@ -171,82 +170,6 @@ func testValidateSecrets(t *testing.T) {
 		err := testCtx.validateInstanceSecret(instanceID)
 		assert.NoError(t, err, "error validating instance secret")
 	}
-}
-
-// testWMCValidation tests if validations of the fields of WindowsMachineConfigs CRD are working as expected
-// We are only checking negative test cases here, positive test cases would check if custom resource is getting created
-// as expected and they are handled in testWindowsNodeCreation function in test/e2e/create_test.go
-func testWMCValidation(t *testing.T) {
-	testCtx, err := NewTestContext(t)
-	require.NoError(t, err)
-	defer testCtx.cleanup()
-
-	require.NoError(t, err, "Could not fetch a namespace")
-
-	var wmcReplicasFieldValidationTests = []struct {
-		name                       string
-		wmc                        *operator.WindowsMachineConfig
-		isTestExpectedToThrowError bool
-		expectedErrorInTest        string
-	}{
-		{
-			name:                       "replicas field absent",
-			wmc:                        createWindowsMachineConfig(testCtx.namespace, false, 0),
-			isTestExpectedToThrowError: false,
-			expectedErrorInTest:        "",
-		},
-		{
-			name:                       "replicas field value less than 0",
-			wmc:                        createWindowsMachineConfig(testCtx.namespace, true, -1),
-			isTestExpectedToThrowError: true,
-			expectedErrorInTest:        "spec.replicas in body should be greater than or equal to 0",
-		},
-	}
-
-	for _, test := range wmcReplicasFieldValidationTests {
-		t.Run(test.name, func(t *testing.T) {
-			// create WMC custom resource as per the test requirement
-			err = framework.Global.Client.Create(context.TODO(), test.wmc,
-				&framework.CleanupOptions{TestContext: testCtx.osdkTestCtx, Timeout: cleanupTimeout, RetryInterval: cleanupRetryInterval})
-
-			if test.isTestExpectedToThrowError {
-				require.Error(t, err, "Creation of WMC custom resource did not throw an error when it was expected to")
-				assert.Contains(t, err.Error(), test.expectedErrorInTest,
-					"Creation of WMC custom resource threw an unexpected error")
-			} else {
-				require.NoError(t, err, "Creation of the WMC custom resource threw an error when it was expected not to")
-				// Fetching WMC persisted in etcd and checking if replicas field value is initialized as expected
-				actualWMC := &operator.WindowsMachineConfig{}
-				err = framework.Global.Client.Get(context.TODO(),
-					kubeTypes.NamespacedName{Name: wmcCRName, Namespace: testCtx.namespace}, actualWMC)
-				require.NoError(t, err, "Could not get the WMC custom resource")
-				assert.Equal(t, test.wmc.Spec.Replicas, actualWMC.Spec.Replicas, "Replicas value of the  WMC custom "+
-					"resource is not as expected")
-			}
-		})
-	}
-}
-
-// createWindowsMachineConfig creates a WindowsMachineConfig object
-func createWindowsMachineConfig(namespace string, isReplicasFieldRequired bool, replicasFieldValue int) *operator.WindowsMachineConfig {
-	wmc := &operator.WindowsMachineConfig{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "WindowsMachineConfig",
-			APIVersion: "wmc.openshift.io/v1alpha1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      wmcCRName,
-			Namespace: namespace,
-		},
-		Spec: operator.WindowsMachineConfigSpec{
-			InstanceType: instanceType,
-			AWS:          &operator.AWS{CredentialAccountID: credentialAccountID, SSHKeyPair: gc.sshKeyPair},
-		},
-	}
-	if isReplicasFieldRequired {
-		wmc.Spec.Replicas = replicasFieldValue
-	}
-	return wmc
 }
 
 // testWorkerLabel tests if the worker label has been applied properly
