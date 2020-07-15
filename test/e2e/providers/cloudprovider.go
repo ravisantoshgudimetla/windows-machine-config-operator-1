@@ -11,7 +11,7 @@ import (
 )
 
 type CloudProvider interface {
-	GenerateMachineSet(bool) (*mapi.MachineSet, error)
+	GenerateMachineSet(bool, int32) (*mapi.MachineSet, error)
 }
 
 func NewCloudProvider() (CloudProvider, error) {

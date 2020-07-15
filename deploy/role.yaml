@@ -134,10 +134,4 @@ rules:
      - get
      - list
      - watch
-# Permissions to access the wmc object
- - apiGroups:
-     - wmc.openshift.io
-   resources:
-     - '*'
-   verbs:
-     - '*'
+

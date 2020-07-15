@@ -4,14 +4,11 @@ import (
 	"context"
 	"log"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
-	operator "github.com/openshift/windows-machine-config-operator/pkg/apis/wmc/v1alpha1"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,11 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-const (
-	instanceType        = "m5a.large"
-	credentialAccountID = "default"
-	wmcCRName           = "instance"
-)
+var machineSetName string
 
 func creationTestSuite(t *testing.T) {
 	// The order of tests here are important. testValidateSecrets is what populates the windowsVMs slice in the gc.
@@ -32,85 +25,11 @@ func creationTestSuite(t *testing.T) {
 	// are the secrets but they are created only after the VMs have been fully configured.
 	// Any node object related tests should be run only after testNodeCreation as that initializes the node objects in
 	// the global context.
-	t.Run("WMC CR validation", testWMCValidation)
-	// the failure behavior test will be skipped if gc.nodes = 0
-	t.Run("failure behavior", testFailureSuite)
 	t.Run("Creation", func(t *testing.T) { testWindowsNodeCreation(t) })
-	t.Run("Status", func(t *testing.T) { testStatusWhenSuccessful(t) })
-	t.Run("ConfigMap validation", func(t *testing.T) { testConfigMapValidation(t) })
-	t.Run("Secrets validation", func(t *testing.T) { testValidateSecrets(t) })
 	t.Run("Network validation", testNetwork)
 	t.Run("Label validation", func(t *testing.T) { testWorkerLabel(t) })
 	t.Run("NodeTaint validation", func(t *testing.T) { testNodeTaint(t) })
 	t.Run("User Data validation", func(t *testing.T) { testUserData(t) })
-	t.Run("Machine Creation", func(t *testing.T) { testWindowsMachineCreation(t) })
-}
-
-// testWindowsMachineCreation tests the creation of the Windows machines and checks if WMCO is properly watching
-// for the Windows machines created
-func testWindowsMachineCreation(t *testing.T) {
-	testCtx, err := NewTestContext(t)
-	require.NoError(t, err)
-	defer testCtx.cleanup()
-	testCases := []struct {
-		testCase  string
-		isWindows bool
-	}{
-		{
-			testCase:  "Create a Windows VM with label",
-			isWindows: true,
-		},
-		{
-			testCase:  "Create a Windows VM without label",
-			isWindows: false,
-		},
-	}
-	var machineSetNames = make([]string, 0, len(testCases))
-	expectedEventCount := 0
-	for _, test := range testCases {
-		machineSet, err := testCtx.CloudProvider.GenerateMachineSet(test.isWindows)
-		require.NoError(t, err)
-		err = framework.Global.Client.Create(context.TODO(), machineSet,
-			&framework.CleanupOptions{TestContext: testCtx.osdkTestCtx, Timeout: cleanupTimeout,
-				RetryInterval: cleanupRetryInterval})
-		require.NoError(t, err)
-		log.Printf("MachineSet Name %s", machineSet.Name)
-		machineSetNames = append(machineSetNames, machineSet.Name)
-		if test.isWindows {
-			expectedEventCount++
-		}
-	}
-	require.NoError(t, testCtx.waitForProvisionedEvent(expectedEventCount, machineSetNames))
-}
-
-// waitForProvisionedEvent waits for 2 minutes for the required number of machines to come to the provisioned state.
-func (tc *testContext) waitForProvisionedEvent(expectedEventCount int, machineSetNames []string) error {
-	var actualEventCount int
-	timeOut := 2 * time.Minute
-	startTime := time.Now()
-	for i := 0; time.Since(startTime) <= timeOut; i++ {
-		eventsList, err := tc.kubeclient.CoreV1().Events("openshift-machine-api").List(context.TODO(),
-			metav1.ListOptions{})
-		if err != nil {
-			log.Printf("event list failed: %v", err)
-			continue
-		}
-		actualEventCount = 0
-		for _, event := range eventsList.Items {
-			if event.Reason == "WMCO Setup" {
-				for _, machineSetName := range machineSetNames {
-					if strings.Contains(event.Message, machineSetName) {
-						actualEventCount++
-					}
-				}
-			}
-		}
-		time.Sleep(5 * time.Second)
-	}
-	if actualEventCount == expectedEventCount {
-		return nil
-	}
-	return errors.Errorf("expected event count %d but got %d", expectedEventCount, actualEventCount)
 }
 
 // testWindowsNodeCreation tests the Windows node creation in the cluster
@@ -118,34 +37,21 @@ func testWindowsNodeCreation(t *testing.T) {
 	testCtx, err := NewTestContext(t)
 	require.NoError(t, err)
 
-	// create WMCO custom resource
-	if _, err := testCtx.createWMC(gc.numberOfNodes, gc.sshKeyPair); err != nil {
-		t.Fatalf("error creating wcmo custom resource  %v", err)
-	}
+	require.NoError(t, testCtx.createWindowsMachineSet(gc.numberOfNodes))
 	if err := testCtx.waitForWindowsNodes(gc.numberOfNodes, true); err != nil {
 		t.Fatalf("windows node creation failed  with %v", err)
 	}
 	log.Printf("Created %d Windows worker nodes", len(gc.nodes))
 }
 
-// createWMC creates a WMC object with the given replicas and keypair
-func (tc *testContext) createWMC(replicas int, keyPair string) (*operator.WindowsMachineConfig, error) {
-	wmco := &operator.WindowsMachineConfig{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "WindowsMachineConfig",
-			APIVersion: "wmc.openshift.io/v1alpha1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      wmcCRName,
-			Namespace: tc.namespace,
-		},
-		Spec: operator.WindowsMachineConfigSpec{
-			InstanceType: instanceType,
-			AWS:          &operator.AWS{CredentialAccountID: credentialAccountID, SSHKeyPair: keyPair},
-			Replicas:     replicas,
-		},
+// createWindowsMachineSet creates given number of Windows Machines.
+func (tc *testContext) createWindowsMachineSet(replicas int32) error {
+	machineSet, err := tc.CloudProvider.GenerateMachineSet(true, replicas)
+	if err != nil {
+		return err
 	}
-	return wmco, framework.Global.Client.Create(context.TODO(), wmco,
+	machineSetName = machineSet.Name
+	return framework.Global.Client.Create(context.TODO(), machineSet,
 		&framework.CleanupOptions{TestContext: tc.osdkTestCtx,
 			Timeout: cleanupTimeout, RetryInterval: cleanupRetryInterval})
 }
@@ -153,7 +59,7 @@ func (tc *testContext) createWMC(replicas int, keyPair string) (*operator.Window
 // waitForWindowsNode waits until there exists nodeCount Windows nodes with the correct set of annotations.
 // if waitForAnnotations = false, the function will return when the node object is first seen and not wait until
 // the expected annotations are present.
-func (tc *testContext) waitForWindowsNodes(nodeCount int, waitForAnnotations bool) error {
+func (tc *testContext) waitForWindowsNodes(nodeCount int32, waitForAnnotations bool) error {
 	var nodes *v1.NodeList
 	annotations := []string{nodeconfig.HybridOverlaySubnet, nodeconfig.HybridOverlayMac}
 
@@ -169,7 +75,7 @@ func (tc *testContext) waitForWindowsNodes(nodeCount int, waitForAnnotations boo
 			}
 			return false, err
 		}
-		if len(nodes.Items) != nodeCount {
+		if len(nodes.Items) != int(nodeCount) {
 			log.Printf("waiting for %d/%d Windows nodes", len(nodes.Items), gc.numberOfNodes)
 			return false, nil
 		}
