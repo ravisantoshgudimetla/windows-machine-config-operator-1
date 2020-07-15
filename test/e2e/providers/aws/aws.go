@@ -31,9 +31,6 @@ const (
 	instanceType = "m5a.large"
 )
 
-// number of replicas of windows machine to be created
-var replicas = int32(1)
-
 type awsProvider struct {
 	// imageID is the AMI image-id to be used for creating Virtual Machine
 	imageID string
@@ -292,12 +289,13 @@ func (a *awsProvider) getIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileS
 		return nil, err
 	}
 	return &ec2.IamInstanceProfileSpecification{
-		Arn: iamspc.InstanceProfile.Arn,
+		Arn:  iamspc.InstanceProfile.Arn,
+		Name: iamspc.InstanceProfile.InstanceProfileName,
 	}, nil
 }
 
 // GenerateMachineSet generates the machineset object which is aws provider specific
-func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool) (*mapi.MachineSet, error) {
+func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool, replicas int32) (*mapi.MachineSet, error) {
 	clusterName, err := a.getInfraID()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get infrastructure id %v", err)
@@ -317,7 +315,6 @@ func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool) (*mapi.MachineSe
 	if err != nil {
 		return nil, fmt.Errorf("unable to get subnet: %v", err)
 	}
-
 	machineSetName := "windows-machineset-"
 	matchLabels := map[string]string{
 		"machine.openshift.io/cluster-api-cluster": clusterName,
@@ -337,14 +334,14 @@ func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool) (*mapi.MachineSe
 	for k, v := range matchLabels {
 		machineLabels[k] = v
 	}
-
+	keyPairName := "openshift-dev"
 	providerSpec := &awsprovider.AWSMachineProviderConfig{
 		AMI: awsprovider.AWSResourceReference{
 			ID: &a.imageID,
 		},
 		InstanceType: a.instanceType,
 		IAMInstanceProfile: &awsprovider.AWSResourceReference{
-			ARN: instanceProfile.Arn,
+			ID: instanceProfile.Name,
 		},
 		CredentialsSecret: &v1.LocalObjectReference{
 			Name: "aws-cloud-credentials",
@@ -362,6 +359,8 @@ func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool) (*mapi.MachineSe
 			a.region,
 			*subnet.AvailabilityZone,
 		},
+		UserDataSecret: &v1.LocalObjectReference{Name: "windows-user-data"},
+		KeyName:        &keyPairName,
 	}
 
 	rawBytes, err := json.Marshal(providerSpec)
