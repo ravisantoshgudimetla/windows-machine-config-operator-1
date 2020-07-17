@@ -26,8 +26,6 @@ func creationTestSuite(t *testing.T) {
 	// Any node object related tests should be run only after testNodeCreation as that initializes the node objects in
 	// the global context.
 	t.Run("Creation", func(t *testing.T) { testWindowsNodeCreation(t) })
-	t.Run("ConfigMap validation", func(t *testing.T) { testConfigMapValidation(t) })
-	t.Run("Secrets validation", func(t *testing.T) { testValidateSecrets(t) })
 	t.Run("Network validation", testNetwork)
 	t.Run("Label validation", func(t *testing.T) { testWorkerLabel(t) })
 	t.Run("NodeTaint validation", func(t *testing.T) { testNodeTaint(t) })

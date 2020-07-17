@@ -5,9 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/retry"
-	wmc "github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig"
 	"github.com/openshift/windows-machine-config-operator/test/e2e/providers"
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	"github.com/pkg/errors"
@@ -26,11 +24,6 @@ var (
 	// gc is the global context across the test suites.
 	gc = globalContext{}
 )
-
-// testVM encapsulates a VM created by the test
-type testVM struct {
-	types.WindowsVM
-}
 
 // globalContext holds the information that we want to use across the test suites.
 // If you want to move item here make sure that
@@ -59,12 +52,8 @@ type testContext struct {
 	namespace string
 	// osdkTestCtx is the operator sdk framework's test Context
 	osdkTestCtx *framework.TestCtx
-	// credentials to be used to access the Windows nodes
-	credentials []wmc.Credentials
 	// kubeclient is the kube client
 	kubeclient kubernetes.Interface
-	// tracker is a pointer to the tracker ConfigMap created by operator
-	tracker *v1.ConfigMap
 	// retryInterval to check for existence of resource in kube api server
 	retryInterval time.Duration
 	// timeout to terminate checking for the existence of resource in kube apiserver
