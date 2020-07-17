@@ -7,7 +7,6 @@ import (
 
 	mapi "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
-	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	wkl "github.com/openshift/windows-machine-config-operator/pkg/controller/wellknownlocations"
 	"github.com/openshift/windows-machine-config-operator/pkg/controller/windowsmachineconfig/nodeconfig"
 	"github.com/pkg/errors"
@@ -71,22 +70,14 @@ func newReconciler(mgr manager.Manager, clusterServiceCIDR string) (reconcile.Re
 		return nil, errors.Wrap(err, "error creating kubernetes clientset")
 	}
 
-	windowsVMs := make(map[types.WindowsVM]bool)
-	vmTracker, err := newTracker(clientset)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to instantiate tracker")
-	}
-
 	signer, err := createSigner()
 	if err != nil {
 		return nil, errors.Wrapf(err, "error creating signer using private key: %v", wkl.PrivateKeyPath)
 	}
 
 	return &ReconcileWindowsMachineConfig{client: client,
-			scheme:             mgr.GetScheme(),
-			k8sclientset:       clientset,
-			tracker:            vmTracker,
-			windowsVMs:         windowsVMs,
+			scheme:       mgr.GetScheme(),
+			k8sclientset: clientset,
 			clusterServiceCIDR: clusterServiceCIDR,
 			signer:             signer,
 			recorder:           mgr.GetEventRecorderFor(ControllerName),
@@ -142,11 +133,9 @@ type ReconcileWindowsMachineConfig struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
+	// TODO: clpudprovider needs to be removed, ravig
 	// cloudProvider holds the information related to the cloud provider.
 	cloudProvider cloudprovider.Cloud
-	// windowsVM is map of interfaces that holds the information related to windows VMs created via the cloud provider.
-	// the bool value represents the existence of the key so that we can confirm to _, ok pattern of golang maps
-	windowsVMs map[types.WindowsVM]bool
 	// k8sclientset holds the kube client that we can re-use for all kube objects other than custom resources.
 	k8sclientset *kubernetes.Clientset
 	// clusterServiceCIDR holds the cluster network service CIDR
@@ -164,6 +153,7 @@ type ReconcileWindowsMachineConfig struct {
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	log.Info("reconciling", "namespace", request.Namespace, "name", request.Name)
+	// TODO: this comment needs to be removed ravig
 	//wmcoObject := false
 
 	if err := r.createUserDataSecret(); err != nil {

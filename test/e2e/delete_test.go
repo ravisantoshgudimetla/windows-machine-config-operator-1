@@ -13,9 +13,8 @@ import (
 
 func deletionTestSuite(t *testing.T) {
 	t.Run("Deletion", func(t *testing.T) { testWindowsNodeDeletion(t) })
+	//TODO ravig this test needs to be removed
 	//t.Run("Status", func(t *testing.T) { testStatusWhenSuccessful(t) })
-	t.Run("ConfigMap validation", func(t *testing.T) { testConfigMapValidation(t) })
-	t.Run("Secrets validation", func(t *testing.T) { testValidateSecrets(t) })
 }
 
 // testWindowsNodeDeletion tests the Windows node deletion from the cluster.
