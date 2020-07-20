@@ -69,7 +69,7 @@ func NewTestContext(t *testing.T) (*testContext, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "test context instantiation failed")
 	}
-	cloudProvider, err := providers.NewCloudProvider()
+	cloudProvider, err := providers.NewCloudProvider(sshKeyPair)
 	if err != nil {
 		return nil, errors.Wrap(err, "cloud provider creation failed")
 	}
