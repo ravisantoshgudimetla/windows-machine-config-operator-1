@@ -128,7 +128,7 @@ func (nc *nodeConfig) Configure() error {
 		return errors.Wrap(err, "configuring the Windows VM failed")
 	}
 	// populate node object in nodeConfig
-	if err := nc.getNode(); err != nil {
+	if err := nc.setNode(); err != nil {
 		return errors.Wrapf(err, "error getting node object for VM %s", nc.ID())
 	}
 	// Apply worker labels
@@ -193,8 +193,8 @@ func (nc *nodeConfig) applyWorkerLabel() error {
 	return nil
 }
 
-// getNode returns a pointer to the node object associated with the instance id provided.
-func (nc *nodeConfig) getNode() error {
+//SetNode  identifies the node from the given instanceID  provided and sets the node object.
+func (nc *nodeConfig) setNode() error {
 	var instanceID string
 	err := wait.Poll(retry.Interval, retry.Timeout, func() (bool, error) {
 		nodes, err := nc.k8sclientset.CoreV1().Nodes().List(context.TODO(),

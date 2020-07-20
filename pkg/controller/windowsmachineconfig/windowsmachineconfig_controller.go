@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	// ControllerName is the name of the WMC controller
+	// ControllerName is the name of the WindowsMachineConfig controller
 	ControllerName = "windowsmachineconfig-controller"
 )
 
@@ -126,7 +126,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 // blank assignment to verify that ReconcileWindowsMachineConfig implements reconcile.Reconciler
 var _ reconcile.Reconciler = &ReconcileWindowsMachineConfig{}
 
-// ReconcileWindowsMachineConfig reconciles a WindowsMachineConfig object
+// ReconcileWindowsMachineConfig reconciles a Windows Machine object
 type ReconcileWindowsMachineConfig struct {
 	// This client, initialized using mgr.Client() above, is a split client
 	// that reads objects from the cache and writes to the apiserver
@@ -142,8 +142,8 @@ type ReconcileWindowsMachineConfig struct {
 	recorder record.EventRecorder
 }
 
-// Reconcile reads that state of the cluster for a WindowsMachineConfig object and makes changes based on the state read
-// and what is in the WindowsMachineConfig.Spec
+// Reconcile reads that state of the cluster for a Windows Machine object and makes changes based on the state read
+// and what is in the Machine.Spec
 // Note:
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
@@ -151,7 +151,7 @@ func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (re
 	log.Info("reconciling", "namespace", request.Namespace, "name", request.Name)
 
 	if err := r.createUserDataSecret(); err != nil {
-		log.Error(err, "error creating user data secret")
+		return reconcile.Result{}, errors.Wrapf(err, "error creating user data secret")
 	}
 	// Fetch the Machine instance
 	machine := &mapi.Machine{}
@@ -166,16 +166,13 @@ func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (re
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	if machine.Status.Phase == nil {
+	if machine.Status.Phase == nil || *machine.Status.Phase != provisionedPhase{
 		// Phase can be nil and should be ignored by WMCO
-		return reconcile.Result{}, nil
-	}
-	if *machine.Status.Phase != provisionedPhase {
 		// If the Machine is not in provisioned state, WMCO shouldn't care about it
 		return reconcile.Result{}, nil
 	}
 
-	// Get the ipAddress associated with the Windows machine.
+	// Get the IP address associated with the Windows machine.
 	if len(machine.Status.Addresses) == 0 {
 		return reconcile.Result{}, nil
 	}
@@ -189,7 +186,7 @@ func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (re
 		return reconcile.Result{}, nil
 	}
 
-	// Get the instanceid associated with the Windows machine.
+	// Get the instance ID associated with the Windows machine.
 	providerID := *machine.Spec.ProviderID
 	if len(providerID) == 0 {
 		return reconcile.Result{}, nil
@@ -214,7 +211,7 @@ func (r *ReconcileWindowsMachineConfig) Reconcile(request reconcile.Request) (re
 	return reconcile.Result{}, nil
 }
 
-// addWorkerNode configures the given worker VM, adding it as a node object to the cluster
+// addWorkerNode configures the given Windows VM, adding it as a node object to the cluster
 func (r *ReconcileWindowsMachineConfig) addWorkerNode(ipAddress, instanceID string) error {
 	log.V(1).Info("configuring the Windows VM", "ID", instanceID)
 	nc, err := nodeconfig.NewNodeConfig(r.k8sclientset, ipAddress, instanceID, r.clusterServiceCIDR, r.signer)

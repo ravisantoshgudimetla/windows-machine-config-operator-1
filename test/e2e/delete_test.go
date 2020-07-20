@@ -22,21 +22,21 @@ func testWindowsNodeDeletion(t *testing.T) {
 
 	// get windowsMachineSet custom resource
 	windowsMachineSet := &mapi.MachineSet{}
-	// Get the WMCO resource called instance
 	err = framework.Global.Client.Get(context.TODO(), types.NamespacedName{Name: machineSetName,
 		Namespace: "openshift-machine-api"}, windowsMachineSet)
 	if err != nil && k8serrors.IsNotFound(err) {
-		// We did not find WMCO CR, let's recreate it. This is a possibility when the creation and deletion tests are
+		// We did not find windowsMachineSet CR, let's recreate it. This is a possibility when the creation and deletion tests are
 		// run independently.
 		err = testCtx.createWindowsMachineSet(1)
 		require.NoError(t, err)
+
 	}
 	// Reset the number of nodes to be deleted to 0
 	gc.numberOfNodes = 0
 	// Delete the Windows VM that got created.
 	windowsMachineSet.Spec.Replicas = &gc.numberOfNodes
 	if err := framework.Global.Client.Update(context.TODO(), windowsMachineSet); err != nil {
-		t.Fatalf("error updating wcmo custom resource  %v", err)
+		t.Fatalf("error updating windowsMachineSet custom resource  %v", err)
 	}
 	// As per testing, each windows VM is taking roughly 12 minutes to be shown up in the cluster, so to be on safe
 	// side, let's make it as 60 minutes.
