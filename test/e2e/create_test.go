@@ -34,19 +34,42 @@ func creationTestSuite(t *testing.T) {
 
 // testWindowsNodeCreation tests the Windows node creation in the cluster
 func testWindowsNodeCreation(t *testing.T) {
+	testCases := []struct {
+		testCase  string
+		isWindows bool
+		replicas int32
+	}{
+		{
+			// We need to create Windows MachineSet without label first, as we are using waitForWindowsNodes method.
+			testCase:  "Create a Windows MachineSet without label",
+			isWindows: false,
+			replicas: 1,
+		},
+		{
+			testCase:  "Create a Windows MachineSet with label",
+			isWindows: true,
+			replicas: gc.numberOfNodes,
+		},
+	}
 	testCtx, err := NewTestContext(t)
 	require.NoError(t, err)
 
-	require.NoError(t, testCtx.createWindowsMachineSet(gc.numberOfNodes))
-	if err := testCtx.waitForWindowsNodes(gc.numberOfNodes, true); err != nil {
-		t.Fatalf("windows node creation failed  with %v", err)
+	for _, test := range testCases {
+		t.Fatalf("failed to create Windows MachineSet %v ", testCtx.createWindowsMachineSet(test.replicas, test.isWindows))
+		err := testCtx.waitForWindowsNodes(test.replicas, true, !test.isWindows)
+
+		if err != nil  && test.isWindows{
+			t.Fatalf("windows node creation failed  with %v", err)
+		}
+		if test.isWindows {
+			log.Printf("Created %d Windows worker nodes", test.replicas)
+		}
 	}
-	log.Printf("Created %d Windows worker nodes", len(gc.nodes))
 }
 
 // createWindowsMachineSet creates given number of Windows Machines.
-func (tc *testContext) createWindowsMachineSet(replicas int32) error {
-	machineSet, err := tc.CloudProvider.GenerateMachineSet(true, replicas)
+func (tc *testContext) createWindowsMachineSet(replicas int32, windowsLabel bool) error {
+	machineSet, err := tc.CloudProvider.GenerateMachineSet(windowsLabel, replicas)
 	if err != nil {
 		return err
 	}
@@ -59,14 +82,25 @@ func (tc *testContext) createWindowsMachineSet(replicas int32) error {
 // waitForWindowsNode waits until there exists nodeCount Windows nodes with the correct set of annotations.
 // if waitForAnnotations = false, the function will return when the node object is first seen and not wait until
 // the expected annotations are present.
-func (tc *testContext) waitForWindowsNodes(nodeCount int32, waitForAnnotations bool) error {
+// if expectError = true, the function will wait for duration of 5 minutes for the nodes, else we will wait for the
+// duration given by nodeCreationTime variable.
+func (tc *testContext) waitForWindowsNodes(nodeCount int32, waitForAnnotations, expectError bool) error {
 	var nodes *v1.NodeList
 	annotations := []string{nodeconfig.HybridOverlaySubnet, nodeconfig.HybridOverlayMac}
+	var creationTime time.Duration
+	if expectError {
+		// The time we expect to wait, if the windowsLabel is
+		// not used while creating nodes.
+		creationTime = time.Minute * 5
+	} else {
+		creationTime = nodeCreationTime
+	}
 
 	// As per testing, each windows VM is taking roughly 12 minutes to be shown up in the cluster, so to be on safe
 	// side, let's make it as 20 minutes per node. The value comes from nodeCreationTime variable.  If we are testing a
-	// scale down from n nodes to 0, then we should not take the number of nodes into account.
-	err := wait.Poll(nodeRetryInterval, time.Duration(math.Max(float64(nodeCount), 1))*nodeCreationTime, func() (done bool, err error) {
+	// scale down from n nodes to 0, then we should not take the number of nodes into account. If we are testing node
+	// creation without applying Windows label, we should throw error within 5 mins.
+	err := wait.Poll(nodeRetryInterval, time.Duration(math.Max(float64(nodeCount), 1))*creationTime, func() (done bool, err error) {
 		nodes, err = tc.kubeclient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: nodeconfig.WindowsOSLabel})
 		if err != nil {
 			if apierrors.IsNotFound(err) {

@@ -44,6 +44,8 @@ type awsProvider struct {
 	openShiftClient *clusterinfo.OpenShift
 	// region in which the Machine needs to be created
 	region string
+	// sshKeyPair is the key pair associated with the Windows VM
+	sshKeyPair string
 }
 
 // newSession uses AWS credentials to create and returns a session for interacting with EC2.
@@ -62,7 +64,7 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // credentialAccountID is the account name the user uses to create VM instance.
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
 func newAWSProvider(openShiftClient *clusterinfo.OpenShift, credentialPath,
-	credentialAccountID, instanceType, region string) (*awsProvider, error) {
+	credentialAccountID, instanceType, region, sshKeyPair string) (*awsProvider, error) {
 	session, err := newSession(credentialPath, credentialAccountID, region)
 	if err != nil {
 		return nil, fmt.Errorf("could not create new AWS session: %v", err)
@@ -82,12 +84,13 @@ func newAWSProvider(openShiftClient *clusterinfo.OpenShift, credentialPath,
 		ec2Client,
 		openShiftClient,
 		region,
+		sshKeyPair,
 	}, nil
 }
 
 // SetupAWSCloudProvider creates AWS provider using the give OpenShift client
 // This is the first step of the e2e test and fails the test upon error.
-func SetupAWSCloudProvider(region string) (*awsProvider, error) {
+func SetupAWSCloudProvider(region, sshKeyPair string) (*awsProvider, error) {
 	oc, err := clusterinfo.GetOpenShift()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize OpenShift client with error: %v", err)
@@ -97,7 +100,7 @@ func SetupAWSCloudProvider(region string) (*awsProvider, error) {
 	if len(awsCredentials) == 0 {
 		return nil, fmt.Errorf("AWS_SHARED_CREDENTIALS_FILE env var is empty")
 	}
-	awsProvider, err := newAWSProvider(oc, awsCredentials, "default", instanceType, region)
+	awsProvider, err := newAWSProvider(oc, awsCredentials, "default", instanceType, region, sshKeyPair)
 	if err != nil {
 		return nil, fmt.Errorf("error obtaining aws interface object: %v", err)
 	}
@@ -334,7 +337,7 @@ func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool, replicas int32) 
 	for k, v := range matchLabels {
 		machineLabels[k] = v
 	}
-	keyPairName := "openshift-dev"
+
 	providerSpec := &awsprovider.AWSMachineProviderConfig{
 		AMI: awsprovider.AWSResourceReference{
 			ID: &a.imageID,
@@ -360,7 +363,7 @@ func (a *awsProvider) GenerateMachineSet(withWindowsLabel bool, replicas int32) 
 			*subnet.AvailabilityZone,
 		},
 		UserDataSecret: &v1.LocalObjectReference{Name: "windows-user-data"},
-		KeyName:        &keyPairName,
+		KeyName:        &a.sshKeyPair,
 	}
 
 	rawBytes, err := json.Marshal(providerSpec)
